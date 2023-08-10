@@ -400,7 +400,6 @@ class Settings
 {
   public minRating: number = 0;
 
-
   public save(): void
   {
     GM.setValue("settings", JSON.stringify(this));
@@ -829,7 +828,10 @@ class ReturnPikabuMinus
     }
     else
     {
-
+      if (postData.story.rating < this.settings.minRating)
+      {
+        storyElem.remove();
+      }
     }
   }
 

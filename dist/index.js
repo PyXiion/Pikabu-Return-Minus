@@ -344,6 +344,7 @@ class PostElement {
     addRatingBar() {
         this.ratingBarElem = HTML_STORY_RATING_BAR.cloneNode(true);
         this.ratingBarInnerElem = this.ratingBarElem.firstChild;
+        // hide the element until the ratio is set
         this.ratingBarElem.style.display = "none";
         this.ratingBlockElem.prepend(this.ratingBarElem);
     }
@@ -351,6 +352,7 @@ class PostElement {
      * @param ratio from 0 to 1. pluses/total
      */
     updateRatingBar(ratio) {
+        // show element
         this.ratingBarElem.style.display = "";
         this.ratingBarInnerElem.style.height = `${ratio * 100}%`;
     }
@@ -542,6 +544,9 @@ class ReturnPikabuMinus {
             await this.processStoryComments(postData);
         }
         else {
+            if (postData.story.rating < this.settings.minRating) {
+                storyElem.remove();
+            }
         }
     }
     async processStoryComments(commentsData) {
