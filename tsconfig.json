@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "outDir": "./dist/",
+    "target": "ES2020",
+    "sourceMap": false,
+    "types": ["greasemonkey"]
+  },
+  "files": [
+    "index.ts",
+    "index.d.ts"
+  ]
+}

@@ -1,0 +1,44 @@
+<!-- HTML_COMMENT_BUTTON_UP -->
+<div class="comment__rating-up green-is-not-red">
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments">
+    <use xlink:href="#icon--comments-next__rating-up"></use>
+  </svg>
+  <div class="comment__rating-count">${pluses}</div>
+</div>
+
+<!-- HTML_COMMENT_BUTTON_DOWN -->
+<div class="comment__rating-down" title="Поставить минус">
+  <div class="comment__rating-count custom-comments-counter">-${minuses}</div>
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments">
+    <use xlink:href="#icon--comments-next__rating-down"></use>
+  </svg>
+</div>
+
+
+<!-- HTML_STORY_RATING_BAR -->
+<div class="pikabu-rating-bar-vertical">
+  <div class="pikabu-rating-bar-vertical-pluses" style="height: 50%;"></div>
+</div>
+
+<!-- Pikabu comment rating bar -->
+<div class="pikabu-rating-bar-vertical-comment">
+  <div class="pikabu-rating-bar-vertical-pluses" style="height: 50%;"></div>
+</div>
+
+<!-- HTML_CUSTOM_SIDEBAR -->
+<div class="sidebar-block sidebar-block_border sidebar-block__content menu menu_vertical">
+  <div class="sidebar-block__content">
+    <details>
+      <summary>
+        Return Pikabu Minus
+      </summary>
+
+      <label for="rating">Минимальный рейтинг:</label>
+      <input type="number" id="min-rating" name="rating" value="0" 
+             step="10" class="input input_editor profile-block input__box settings-main__label" 
+             min="-100" max="300"/>
+      
+      <p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p>
+    </details>
+  </div>
+</div>
