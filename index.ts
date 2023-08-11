@@ -196,9 +196,9 @@ namespace Pikabu
     {
       super();
       this.id = payload.story_id;
-      this.rating = payload.story_digs;
-      this.pluses = payload.story_pluses;
-      this.minuses = payload.story_minuses;
+      this.rating = payload.story_digs ?? 0;
+      this.pluses = payload.story_pluses ?? 0;
+      this.minuses = payload.story_minuses ?? 0;
     } 
   }
 
@@ -211,9 +211,9 @@ namespace Pikabu
       super();
       this.id = payload.comment_id;
       this.parentId = payload.parent_id;
-      this.rating = payload.comment_rating;
-      this.pluses = payload.comment_pluses;
-      this.minuses = payload.comment_minuses;
+      this.rating = payload.comment_rating ?? 0;
+      this.pluses = payload.comment_pluses ?? 0;
+      this.minuses = payload.comment_minuses ?? 0;
     } 
   }
 
