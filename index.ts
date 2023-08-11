@@ -114,18 +114,12 @@ namespace Pikabu
     }
   }
 
-  type RequestParams = {[k: string]: string | number};
-  type RequestParamsGetStory = RequestParams & {
-    story_id: number,
-    page?: number
-  };
-
   class Request extends HttpRequest 
   {
     private controller: PikabuController;
-    private params: RequestParams;
+    private params: PikabuJson.RequestParams;
 
-    public constructor(domain: string, controller: PikabuController, params?: RequestParams)
+    public constructor(domain: string, controller: PikabuController, params?: PikabuJson.RequestParams)
     {
       super(domain + controller);
       this.controller = controller;
@@ -144,7 +138,7 @@ namespace Pikabu
       this.params[key] = value;
     }
 
-    private static getHash(data: RequestParams, controller: string, ms: number)
+    private static getHash(data: PikabuJson.RequestParams, controller: string, ms: number)
     {
       const join = Object.values(data).sort().join(',');
       const toHash = [API_KEY, controller, ms, join].join(",");
@@ -182,7 +176,7 @@ namespace Pikabu
 
   class PostRequest extends Request
   {
-    public constructor(controller: PikabuController, params?: RequestParams)
+    public constructor(controller: PikabuController, params?: PikabuJson.RequestParams)
     {
       super(API_V1, controller, params)
       this.setHttpMethod("POST");
@@ -236,11 +230,13 @@ namespace Pikabu
   export class CommentsData extends StoryData
   {
     public comments: Comment[];
+    public selectedCommentId: number;
 
     public constructor(payload: PikabuJson.StoryGetResponse)
     {
       super(payload);
 
+      this.selectedCommentId = 0;
       this.comments = payload.comments.map((x) => new Comment(x));
     }
   }
@@ -249,7 +245,7 @@ namespace Pikabu
   {
     export async function fetchStory(storyId: number, commentsPage: number): Promise<CommentsData>
     {
-      const params: RequestParamsGetStory = {
+      const params: PikabuJson.RequestParamsGetStory = {
         story_id: storyId,
         page: commentsPage
       };
@@ -261,6 +257,7 @@ namespace Pikabu
 
         const commentsData = new CommentsData(payload);
         
+        console.log(commentsData);
         return commentsData;
       }
       catch (error)
@@ -275,6 +272,8 @@ namespace Pikabu
 
 //#region Extension
 //#region Contants
+const URL_PARAMS_COMMENT_ID = "cid";
+
 const DOM_MAIN_QUERY = ".main";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
@@ -417,7 +416,7 @@ class Settings
 
 interface ElementWithRating
 {
-  setRating(pluses: number, minuses: number): void;
+  setRating(pluses: number, rating: number, minuses: number): void;
 }
 
 class PostElement implements ElementWithRating
@@ -522,15 +521,17 @@ class PostElement implements ElementWithRating
   {
     // show element
     this.ratingBarElem.style.display = "";
-    this.ratingBarInnerElem.style.height = `${ratio * 100}%`
+
+    ratio = Math.round(ratio * 100);
+    this.ratingBarInnerElem.style.height = `${ratio}%`
   }
 
-  public setRating(pluses: number, minuses: number): void {
+  public setRating(pluses: number, rating: number, minuses: number): void {
     if (!this.isEdited)
       return;
     
     this.ratingUpCounter.innerText = `${pluses}`;
-    this.ratingCounter.innerText = `${pluses - minuses}`;
+    this.ratingCounter.innerText = `${rating}`;
     this.ratingDownCounter.innerText = `-${minuses}`;
 
     if (pluses + minuses !== 0)
@@ -645,6 +646,8 @@ class CommentElement implements ElementWithRating
   {
     this.ratingBarElem = HTML_COMMENT_RATING_BAR.cloneNode(true) as HTMLElement;
     this.ratingBarInnerElem = this.ratingBarElem.firstChild as HTMLElement;
+    // hide the element until the ratio is set
+    this.ratingBarElem.style.display = "none";
     
     this.bodyElem.prepend(this.ratingBarElem);
   }
@@ -654,22 +657,22 @@ class CommentElement implements ElementWithRating
    */
   private updateRatingBar(ratio: number)
   {
+    // show the element
+    this.ratingBarElem.style.display = "block";
     this.ratingBarInnerElem.style.height = `${ratio * 100}%`
   }
 
-  public setRating(pluses: number, minuses: number): void
+  public setRating(pluses: number, rating: number, minuses: number): void
   {
     if (!this.isEdited)
       return;
     
     this.ratingUpCounterElem.innerText = `${pluses}`;
-    this.ratingCounterElem.innerText = `${pluses - minuses}`;
+    this.ratingCounterElem.innerText = `${rating}`;
     this.ratingDownCounterElem.innerText = `-${minuses}`;
 
     if (pluses + minuses !== 0)
       this.updateRatingBar(pluses / (pluses + minuses));
-    else
-      this.updateRatingBar(0.5);
   }
 
   public static getById(commentId: string | number)
@@ -729,6 +732,7 @@ class ReturnPikabuMinus
   private sidebar: SidebarElement;
   private commentsToUpdate: Pikabu.Comment[];
   private mutationObserver: MutationObserver;
+
   private isStoryPage: boolean;
 
   public constructor()
@@ -801,7 +805,7 @@ class ReturnPikabuMinus
     }
 
     const commentElem = new CommentElement(commentHtmlElem);
-    commentElem.setRating(comment.pluses, comment.minuses);
+    commentElem.setRating(comment.pluses, comment.rating, comment.minuses);
 
     return true;
   }
@@ -820,7 +824,7 @@ class ReturnPikabuMinus
     const post = new PostElement(storyElem);
     const postData = await Pikabu.DataService.fetchStory(post.getId(), 1);
 
-    post.setRating(postData.story.pluses, postData.story.minuses);
+    post.setRating(postData.story.pluses, postData.story.rating, postData.story.minuses);
 
     if (this.isStoryPage)
     {
@@ -844,12 +848,6 @@ class ReturnPikabuMinus
       const promises: Promise<boolean>[] = [];
       for (const comment of commentsData.comments)
       {
-        if (comment.parentId !== 0)
-        {
-          this.commentsToUpdate.push(comment);
-          continue;
-        }
-
         promises.push(this.processComment(comment));
       }
       await Promise.all(promises);

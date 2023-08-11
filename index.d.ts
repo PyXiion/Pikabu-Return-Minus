@@ -24,7 +24,7 @@ declare namespace PikabuJson
      */
     story_digs: number;
   }
-  
+
   interface Comment
   {
     /**
@@ -84,4 +84,11 @@ declare namespace PikabuJson
      */
     has_next_page_comments: boolean;
   }
+
+  type RequestParams = {[k: string]: string | number};
+  type RequestParamsGetStory = RequestParams & {
+    story_id: number,
+    page?: number,
+    selected_comment_id?: number
+  };
 }

@@ -154,6 +154,7 @@ var Pikabu;
     class CommentsData extends StoryData {
         constructor(payload) {
             super(payload);
+            this.selectedCommentId = 0;
             this.comments = payload.comments.map((x) => new Comment(x));
         }
     }
@@ -169,6 +170,7 @@ var Pikabu;
                 const request = new PostRequest("story.get", params);
                 const payload = (await request.executeAsync());
                 const commentsData = new CommentsData(payload);
+                console.log(commentsData);
                 return commentsData;
             }
             catch (error) {
@@ -182,6 +184,7 @@ var Pikabu;
 //#endregion
 //#region Extension
 //#region Contants
+const URL_PARAMS_COMMENT_ID = "cid";
 const DOM_MAIN_QUERY = ".main";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
@@ -354,13 +357,14 @@ class PostElement {
     updateRatingBar(ratio) {
         // show element
         this.ratingBarElem.style.display = "";
-        this.ratingBarInnerElem.style.height = `${ratio * 100}%`;
+        ratio = Math.round(ratio * 100);
+        this.ratingBarInnerElem.style.height = `${ratio}%`;
     }
-    setRating(pluses, minuses) {
+    setRating(pluses, rating, minuses) {
         if (!this.isEdited)
             return;
         this.ratingUpCounter.innerText = `${pluses}`;
-        this.ratingCounter.innerText = `${pluses - minuses}`;
+        this.ratingCounter.innerText = `${rating}`;
         this.ratingDownCounter.innerText = `-${minuses}`;
         if (pluses + minuses !== 0)
             this.updateRatingBar(pluses / (pluses + minuses));
@@ -429,24 +433,26 @@ class CommentElement {
     addRatingBar() {
         this.ratingBarElem = HTML_COMMENT_RATING_BAR.cloneNode(true);
         this.ratingBarInnerElem = this.ratingBarElem.firstChild;
+        // hide the element until the ratio is set
+        this.ratingBarElem.style.display = "none";
         this.bodyElem.prepend(this.ratingBarElem);
     }
     /**
      * @param ratio from 0 to 1. pluses/total
      */
     updateRatingBar(ratio) {
+        // show the element
+        this.ratingBarElem.style.display = "block";
         this.ratingBarInnerElem.style.height = `${ratio * 100}%`;
     }
-    setRating(pluses, minuses) {
+    setRating(pluses, rating, minuses) {
         if (!this.isEdited)
             return;
         this.ratingUpCounterElem.innerText = `${pluses}`;
-        this.ratingCounterElem.innerText = `${pluses - minuses}`;
+        this.ratingCounterElem.innerText = `${rating}`;
         this.ratingDownCounterElem.innerText = `-${minuses}`;
         if (pluses + minuses !== 0)
             this.updateRatingBar(pluses / (pluses + minuses));
-        else
-            this.updateRatingBar(0.5);
     }
     static getById(commentId) {
         const commentElem = document.getElementById(DOM_COMMENT_ID + commentId);
@@ -527,7 +533,7 @@ class ReturnPikabuMinus {
             return false;
         }
         const commentElem = new CommentElement(commentHtmlElem);
-        commentElem.setRating(comment.pluses, comment.minuses);
+        commentElem.setRating(comment.pluses, comment.rating, comment.minuses);
         return true;
     }
     processStaticPosts() {
@@ -539,7 +545,7 @@ class ReturnPikabuMinus {
     async processStoryElement(storyElem) {
         const post = new PostElement(storyElem);
         const postData = await Pikabu.DataService.fetchStory(post.getId(), 1);
-        post.setRating(postData.story.pluses, postData.story.minuses);
+        post.setRating(postData.story.pluses, postData.story.rating, postData.story.minuses);
         if (this.isStoryPage) {
             await this.processStoryComments(postData);
         }
@@ -555,10 +561,6 @@ class ReturnPikabuMinus {
         while (commentsData.comments.length > 0) {
             const promises = [];
             for (const comment of commentsData.comments) {
-                if (comment.parentId !== 0) {
-                    this.commentsToUpdate.push(comment);
-                    continue;
-                }
                 promises.push(this.processComment(comment));
             }
             await Promise.all(promises);
