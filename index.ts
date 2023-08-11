@@ -1,13 +1,12 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.3.2
+// @version      0.3.3
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
 // @match        *://pikabu.ru/*
 // @connect      api.pikabu.ru
 // @grant        GM.xmlHttpRequest
-// @grant        GM.addStyle
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @require      https://greasyfork.org/scripts/452219-md5-%E5%87%BD%E6%95%B0/code/MD5%20%E5%87%BD%E6%95%B0.js?version=1099124
@@ -257,7 +256,6 @@ namespace Pikabu
 
         const commentsData = new CommentsData(payload);
         
-        console.log(commentsData);
         return commentsData;
       }
       catch (error)
@@ -312,8 +310,8 @@ const ATTIRUBE_MINUSES_COUNT = "data-minuses";
 
 const HTML_SRC_STORY_RATING_BAR = '<div class="pikabu-rating-bar-vertical-pluses"></div>';
 const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating}</span>';
-const HTML_SRC_COMMENT_BUTTON_UP = '<div class="comment__rating-up green-is-not-red"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div></div>';
-const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-down" title="Поставить минус"><div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg></div>';
+const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
+const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
 const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
 
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
@@ -736,11 +734,19 @@ class ReturnPikabuMinus
     this.commentsToUpdate = [];
     this.isStoryPage = window.location.href.includes("/story/");
 
-    GM.addStyle(EXTRA_CSS);
+  }
+
+  private addStyle(css: string)
+  {
+    const styleSheet = document.createElement("style");
+    styleSheet.innerText = css;
+    // is added to the end of the body because it must override some of the original styles
+    document.body.appendChild(styleSheet);
   }
 
   private async onLoad()
   {
+    this.addStyle(EXTRA_CSS);
     this.settings = await Settings.load();
     this.sidebar = new SidebarElement(this.settings, false);
 
