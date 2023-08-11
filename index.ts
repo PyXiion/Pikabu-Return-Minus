@@ -299,7 +299,7 @@ const DOM_COMMENT_HEADER_USER_CLASS_QUERY = ".comment__user";
 
 const DOM_COMMENT_HEADER_RATING_UP_CLASS_QUERY = ".comment__rating-up";
 const DOM_COMMENT_HEADER_RATING_CLASS_QUERY = ".comment__rating-count";
-const DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY = ".comment__rating-count";
+const DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY = ":scope > .comment__rating-count";
 const DOM_COMMENT_HEADER_RATING_DOWN_CLASS_QUERY = ".comment__rating-down";
 
 const DOM_COMMENT_OWN_HEADER_RATING_COUNT_CLASS_QUERY = ".comment__rating-count";
@@ -312,8 +312,8 @@ const ATTIRUBE_MINUSES_COUNT = "data-minuses";
 
 const HTML_SRC_STORY_RATING_BAR = '<div class="pikabu-rating-bar-vertical-pluses"></div>';
 const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating}</span>';
-const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
-const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count custom-comments-counter">-${minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
+const HTML_SRC_COMMENT_BUTTON_UP = '<div class="comment__rating-up green-is-not-red"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div></div>';
+const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-down" title="Поставить минус"><div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg></div>';
 const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
 
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
@@ -347,21 +347,17 @@ const EXTRA_CSS = `
 .story__rating-down:hover .story__rating-count {
   color:var(--color-danger-800)
 }
+.story__rating-count {
+  margin: 7px 0 7px;
+}
 .custom-comments-counter {
-  padding-right: 12px;
+  margin-right: 8px;
 }
-.comment__rating-count.custom-comments-counter {
-  padding-left: 4px;
+.comment__rating-down .comment__rating-count {
+  margin-right: 8px;
 }
-.pikabu-story-rating {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.pikabu-pluses {
-  color:var(--color-primary-700)
-}
-.pikabu-minuses {
-  color:var(--color-danger-800)
+.comment__rating-down {
+  padding: 2px 8px;
 }
 
 .pikabu-rating-bar-vertical {
@@ -532,12 +528,10 @@ class PostElement implements ElementWithRating
     
     this.ratingUpCounter.innerText = `${pluses}`;
     this.ratingCounter.innerText = `${rating}`;
-    this.ratingDownCounter.innerText = `-${minuses}`;
+    this.ratingDownCounter.innerText = `${-minuses}`;
 
     if (pluses + minuses !== 0)
       this.updateRatingBar(pluses / (pluses + minuses))
-    else
-      this.updateRatingBar(0.5);
   }
 
   public getId()
@@ -579,9 +573,9 @@ class CommentElement implements ElementWithRating
     this.headerElem = this.bodyElem.querySelector(DOM_COMMENT_HEADER_CLASS_QUERY);
     
     // check is already edited
-    this.isEdited = this.commentElem.hasAttribute("pikabu-return-minus");
+    this.isEdited = this.commentElem.hasAttribute(ATTRIBUTE_MARK_EDITED);
 
-    this.commentElem.setAttribute("pikabu-return-minus", "true");
+    this.commentElem.setAttribute(ATTRIBUTE_MARK_EDITED, "true");
 
     this.userElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_USER_CLASS_QUERY);
 
@@ -667,9 +661,9 @@ class CommentElement implements ElementWithRating
     if (!this.isEdited)
       return;
     
-    this.ratingUpCounterElem.innerText = `${pluses}`;
+    this.ratingUpCounterElem.innerText = `${pluses}`; // no need
     this.ratingCounterElem.innerText = `${rating}`;
-    this.ratingDownCounterElem.innerText = `-${minuses}`;
+    this.ratingDownCounterElem.innerText = `${-minuses}`;
 
     if (pluses + minuses !== 0)
       this.updateRatingBar(pluses / (pluses + minuses));

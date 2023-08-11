@@ -1,21 +1,17 @@
 .story__rating-down:hover .story__rating-count {
   color:var(--color-danger-800)
 }
+.story__rating-count {
+  margin: 7px 0 7px;
+}
 .custom-comments-counter {
-  padding-right: 12px;
+  margin-right: 8px;
 }
-.comment__rating-count.custom-comments-counter {
-  padding-left: 4px;
+.comment__rating-down .comment__rating-count {
+  margin-right: 8px;
 }
-.pikabu-story-rating {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.pikabu-pluses {
-  color:var(--color-primary-700)
-}
-.pikabu-minuses {
-  color:var(--color-danger-800)
+.comment__rating-down {
+  padding: 2px 8px;
 }
 
 .pikabu-rating-bar-vertical {
