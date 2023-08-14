@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.3.5
+// @version      0.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -272,7 +272,7 @@ namespace Pikabu
 //#region Contants
 const URL_PARAMS_COMMENT_ID = "cid";
 
-const DOM_MAIN_QUERY = ".main";
+const DOM_MAIN_QUERY = ".main, .main__content";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 
@@ -286,20 +286,21 @@ const DOM_STORY_RATING_COUNT_CLASS_QUERY = ".story__rating-count";
 const DOM_STORY_RATING_TOTAL_CLASS_QUERY = ".pikabu-story-rating"; // custom
 
 const DOM_STORY_RATING_BLOCK_UP_CLASS_QUERY = ".story__rating-plus";
-const DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY = ".story__rating-down";
+const DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY = ".story__rating-minus, .story__rating-down";
 
-const DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY = ".story_footer-rating > div"; // it's wrapped
+const DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY = ".story__footer-rating > div"; // it's wrapped
 
 const DOM_COMMENT_ID = "comment_";
 const DOM_COMMENT_CLASS_QUERY = ".comment";
+const DOM_COMMENT_RATING_BLOCK_CLASS_QUERY = ".comment__rating";
 const DOM_COMMENT_HEADER_CLASS_QUERY = ".comment__header";
 const DOM_COMMENT_BODY_CLASS_QUERY = ".comment__body";
 const DOM_COMMENT_HEADER_USER_CLASS_QUERY = ".comment__user";
 
 const DOM_COMMENT_HEADER_RATING_UP_CLASS_QUERY = ".comment__rating-up";
 const DOM_COMMENT_HEADER_RATING_CLASS_QUERY = ".comment__rating-count";
-const DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY = ":scope > .comment__rating-count";
 const DOM_COMMENT_HEADER_RATING_DOWN_CLASS_QUERY = ".comment__rating-down";
+const DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY = ":scope > .comment__rating-count";
 
 const DOM_COMMENT_OWN_HEADER_RATING_COUNT_CLASS_QUERY = ".comment__rating-count";
 
@@ -311,6 +312,7 @@ const ATTIRUBE_MINUSES_COUNT = "data-minuses";
 
 const HTML_SRC_STORY_RATING_BAR = '<div class="pikabu-rating-bar-vertical-pluses"></div>';
 const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating}</span>';
+const HTML_SRC_MOBILE_STORY_BUTTON_MINUS = '<span class="story__rating-count">${minuses}</span><span type="button" class="tool story__rating-down" data-role="rating-down"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story"><use xlink:href="#icon--ui__rating-down"></use></svg></span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
 const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать рейтинг у постов</label></div><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
@@ -324,6 +326,10 @@ HTML_STORY_RATING.classList.add("pikabu-story-rating");
 const HTML_STORY_RATING_BAR = document.createElement("div");
 HTML_STORY_RATING_BAR.className = "pikabu-rating-bar-vertical";
 HTML_STORY_RATING_BAR.innerHTML = HTML_SRC_STORY_RATING_BAR;
+
+const HTML_MOBILE_STORY_BUTTON_MINUS = document.createElement("button");
+HTML_MOBILE_STORY_BUTTON_MINUS.className = "story__rating-minus";
+HTML_MOBILE_STORY_BUTTON_MINUS.innerHTML = HTML_SRC_MOBILE_STORY_BUTTON_MINUS;
 
 const HTML_COMMENT_RATING_BAR = document.createElement("div");
 HTML_COMMENT_RATING_BAR.className = "pikabu-rating-bar-vertical-comment";
@@ -386,7 +392,27 @@ const EXTRA_CSS = `
   top: 20px;
   max-height: 100px;
 }
-`;
+
+/* mobile only */
+.story__footer-rating .story__rating-minus {
+  background-color:var(--color-black-300);
+  border-radius:8px;
+  overflow:hidden;
+  padding:0;
+  display:flex;
+  align-items:center
+}
+
+.story__footer-rating .story__rating-down {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding-left:2px
+}
+
+.story__rating-minus .story__rating-count {
+  padding: 0 1px 0 10px;
+}`;
 
 //#endregion
 
@@ -417,7 +443,8 @@ interface ElementWithRating
 
 class PostElement implements ElementWithRating
 {
-  private static isMobile: boolean = null;
+  public static isMobile: boolean = null;
+  
   private settings: Settings;
 
   private id: number;
@@ -431,15 +458,13 @@ class PostElement implements ElementWithRating
   private ratingBarElem: HTMLElement;
   private ratingBarInnerElem: HTMLElement;
 
-  // PC
-  private leftSidebarElem: HTMLElement;
   private ratingBlockElem: HTMLElement;
   private ratingUpElem: HTMLElement;
   private ratingElem: HTMLElement;
   private ratingDownElem: HTMLElement;
 
-  // Mobile
-  // TODO
+  // PC only
+  private leftSidebarElem: HTMLElement;
 
   public constructor(storyElem: HTMLElement, settings: Settings)
   {
@@ -464,9 +489,7 @@ class PostElement implements ElementWithRating
   {
     if (PostElement.isMobile)
     {
-      alert("Mobile version isn't implemented")
-      return;
-      // TODO
+      this.ratingBlockElem = this.storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
     }
     else
     {
@@ -475,33 +498,45 @@ class PostElement implements ElementWithRating
         return;
 
       this.ratingBlockElem = this.leftSidebarElem.querySelector(DOM_STORY_RATING_BLOCK_CLASS_QUERY);
+    }
 
-      this.ratingUpElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_UP_CLASS_QUERY);
-      this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY);
-    
-      if (this.isEdited)
+    this.ratingUpElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_UP_CLASS_QUERY);
+    this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY);
+  
+    if (this.isEdited)
+    {
+      this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
+      this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
+      
+      if (this.settings.showStoryRating)
+        this.ratingCounter = this.ratingBlockElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
+    }
+    else
+    {
+      if (this.settings.showStoryRating)
       {
-        this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-        this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-        
-        if (this.settings.showStoryRating)
-          this.ratingCounter = this.ratingBlockElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
+        this.ratingElem = HTML_STORY_RATING.cloneNode(true) as HTMLElement;
+        this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
+        this.ratingCounter = this.ratingElem;
       }
-      else
-      {
-        if (this.settings.showStoryRating)
-        {
-          this.ratingElem = HTML_STORY_RATING.cloneNode(true) as HTMLElement;
-          this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
-          this.ratingCounter = this.ratingElem;
-        }
 
+      if (PostElement.isMobile)
+      {
+        const newButton = HTML_MOBILE_STORY_BUTTON_MINUS.cloneNode(true) as HTMLElement;
+        this.ratingDownElem.replaceWith(newButton);
+        this.ratingDownElem = newButton;
+
+        this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
+      }
+      else 
+      {
         this.ratingDownCounter = HTML_STORY_MINUSES_RATING.cloneNode(true) as HTMLElement;
         this.ratingDownElem.prepend(this.ratingDownCounter);
-
-        this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY)
       }
+
+      this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY)
     }
+
     this.addRatingBar();
     this.isEdited = true;
   }
@@ -554,10 +589,12 @@ class CommentElement implements ElementWithRating
   private commentElem: HTMLElement;
   private headerElem: HTMLElement;
   private bodyElem: HTMLElement;
+  private userElem: HTMLElement;
+
+  private ratingBlockElem: HTMLElement;
   private ratingUpElem: HTMLElement;
   private ratingElem: HTMLElement;
   private ratingDownElem: HTMLElement;
-  private userElem: HTMLElement;
 
   private ratingUpCounterElem: HTMLElement;
   private ratingCounterElem: HTMLElement;
@@ -572,8 +609,23 @@ class CommentElement implements ElementWithRating
   public constructor(commentElem: HTMLElement)
   {
     this.commentElem = commentElem;
-    this.bodyElem = commentElem.querySelector(DOM_COMMENT_BODY_CLASS_QUERY);
+
+    this.parseAndModify();
+  }
+
+  private parseAndModify()
+  {
+    this.bodyElem = this.commentElem.querySelector(DOM_COMMENT_BODY_CLASS_QUERY);
     this.headerElem = this.bodyElem.querySelector(DOM_COMMENT_HEADER_CLASS_QUERY);
+
+    if (PostElement.isMobile)
+    {
+      this.ratingBlockElem = this.bodyElem.querySelector(DOM_COMMENT_RATING_BLOCK_CLASS_QUERY);
+    }
+    else
+    {
+      this.ratingBlockElem = this.headerElem;
+    }
     
     // check is already edited
     this.isEdited = this.commentElem.hasAttribute(ATTRIBUTE_MARK_EDITED);
@@ -585,11 +637,6 @@ class CommentElement implements ElementWithRating
     this.isOwn = this.userElem.hasAttribute("data-own") 
       && this.userElem.getAttribute("data-own") === "true";
 
-    this.parseAndModify();
-  }
-
-  private parseAndModify()
-  {
     // delete plus counter
     if (this.isOwn && !this.isEdited)
     {
@@ -599,7 +646,7 @@ class CommentElement implements ElementWithRating
     }
 
     if (this.isEdited)
-      this.ratingElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY);
+      this.ratingElem = this.ratingBlockElem.querySelector(DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY);
     else
       this.ratingElem = HTML_COMMENT_RATING.cloneNode(true) as HTMLElement;
     
@@ -608,25 +655,21 @@ class CommentElement implements ElementWithRating
       // create new buttons and counter
       this.ratingUpElem = HTML_COMMENT_BUTTON_UP.cloneNode(true) as HTMLElement;
       this.ratingDownElem = HTML_COMMENT_BUTTON_DOWN.cloneNode(true) as HTMLElement;
-      this.headerElem.prepend(this.ratingUpElem, this.ratingElem, this.ratingDownElem)
+      this.ratingBlockElem.prepend(this.ratingUpElem, this.ratingElem, this.ratingDownElem)
     }
     else
     {
       // update buttons
-      this.ratingUpElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_RATING_UP_CLASS_QUERY);
-      this.ratingDownElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_RATING_DOWN_CLASS_QUERY);
+      this.ratingUpElem = this.ratingBlockElem.querySelector(DOM_COMMENT_HEADER_RATING_UP_CLASS_QUERY);
+      this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_COMMENT_HEADER_RATING_DOWN_CLASS_QUERY);
 
       if (!this.isEdited)
       {
         // add counter
-        this.headerElem.insertBefore(this.ratingElem, this.ratingDownElem);
+        this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
 
         this.ratingUpElem.innerHTML = HTML_SRC_COMMENT_BUTTON_UP;
         this.ratingDownElem.innerHTML = HTML_SRC_COMMENT_BUTTON_DOWN;
-
-        // For some reason it becomes invalid after changing outerHTML.
-        this.ratingUpElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_RATING_UP_CLASS_QUERY);
-        this.ratingDownElem = this.headerElem.querySelector(DOM_COMMENT_HEADER_RATING_DOWN_CLASS_QUERY);
       }
     }
 
@@ -744,6 +787,7 @@ class ReturnPikabuMinus
   private commentsToUpdate: Pikabu.Comment[];
   private mutationObserver: MutationObserver;
 
+  private isMobile: boolean;
   private isStoryPage: boolean;
 
   public constructor()
@@ -767,7 +811,10 @@ class ReturnPikabuMinus
   {
     this.addStyle(EXTRA_CSS);
     this.settings = await Settings.load();
-    this.sidebar = new SidebarElement(this.settings, false);
+    this.isMobile = this.checkIsMobile();
+    PostElement.isMobile = this.isMobile;
+
+    this.sidebar = new SidebarElement(this.settings, this.isMobile);
 
     this.mutationObserver = new MutationObserver(this.observeMutations.bind(this));
     const mainElem = document.querySelector(DOM_MAIN_QUERY);
@@ -778,6 +825,23 @@ class ReturnPikabuMinus
     });
 
     this.processStaticPosts();
+  }
+
+  // from https://greasyfork.org/ru/scripts/468458-pikabu-purifier/code
+  private checkIsMobile()
+  {
+    const scriptElements = document.getElementsByTagName("script");
+
+    for (let i = 0; i < scriptElements.length; i++) {
+      const scriptSrc = scriptElements[i].src;
+      if (scriptSrc) {
+        if (scriptSrc.includes('mobile')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private observeMutations(mutations: MutationRecord[], observer: MutationObserver)
