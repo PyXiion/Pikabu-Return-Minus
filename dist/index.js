@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.3.4
+// @version      0.3.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -187,6 +187,7 @@ const DOM_MAIN_QUERY = ".main";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
+const DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID = "show-story-rating";
 const DOM_STORY_QUERY = "article.story";
 const DOM_STORY_LEFT_SIDEBAR_CLASS_QUERY = ".story__left";
 const DOM_STORY_RATING_BLOCK_CLASS_QUERY = ".story__rating-block";
@@ -213,7 +214,7 @@ const HTML_SRC_STORY_RATING_BAR = '<div class="pikabu-rating-bar-vertical-pluses
 const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating}</span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
-const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
+const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать рейтинг у постов</label></div><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
 HTML_STORY_MINUSES_RATING.className = "story__rating-count";
 const HTML_STORY_RATING = HTML_STORY_MINUSES_RATING.cloneNode();
@@ -282,6 +283,7 @@ const EXTRA_CSS = `
 class Settings {
     constructor() {
         this.minRating = 0;
+        this.showStoryRating = true;
     }
     save() {
         GM.setValue("settings", JSON.stringify(this));
@@ -296,8 +298,9 @@ class Settings {
 class PostElement {
     // Mobile
     // TODO
-    constructor(storyElem) {
+    constructor(storyElem, settings) {
         this.storyElem = storyElem;
+        this.settings = settings;
         this.id = parseInt(storyElem.getAttribute(ATTRIBUTE_STORY_ID));
         this.isEdited = storyElem.hasAttribute(ATTRIBUTE_MARK_EDITED);
         storyElem.setAttribute(ATTRIBUTE_MARK_EDITED, "true");
@@ -323,17 +326,20 @@ class PostElement {
             this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY);
             if (this.isEdited) {
                 this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-                this.ratingCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
                 this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
+                if (this.settings.showStoryRating)
+                    this.ratingCounter = this.ratingBlockElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
             }
             else {
-                this.ratingElem = HTML_STORY_RATING.cloneNode(true);
+                if (this.settings.showStoryRating) {
+                    this.ratingElem = HTML_STORY_RATING.cloneNode(true);
+                    this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
+                    this.ratingCounter = this.ratingElem;
+                }
                 this.ratingDownCounter = HTML_STORY_MINUSES_RATING.cloneNode(true);
-                this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
                 this.ratingDownElem.prepend(this.ratingDownCounter);
                 this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
             }
-            this.ratingCounter = this.ratingElem;
         }
         this.addRatingBar();
         this.isEdited = true;
@@ -358,17 +364,14 @@ class PostElement {
         if (!this.isEdited)
             return;
         this.ratingUpCounter.innerText = `${pluses}`;
-        this.ratingCounter.innerText = `${rating}`;
         this.ratingDownCounter.innerText = `${-minuses}`;
+        if (this.settings.showStoryRating)
+            this.ratingCounter.innerText = `${rating}`;
         if (pluses + minuses !== 0)
             this.updateRatingBar(pluses / (pluses + minuses));
     }
     getId() {
         return this.id;
-    }
-    static getById(id) {
-        const elem = document.querySelector(`${DOM_STORY_QUERY}[${ATTRIBUTE_STORY_ID}="${id}"]`);
-        return elem !== null ? new PostElement(elem) : null;
     }
 }
 PostElement.isMobile = null;
@@ -468,12 +471,22 @@ class SidebarElement {
         this.minRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID);
         this.minRatingInput.addEventListener("change", this.minRatingChange.bind(this));
         this.minRatingInput.value = `${this.settings.minRating}`;
+        this.showStoryRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID);
+        this.showStoryRatingInput.addEventListener("change", this.showStoryRatingChange.bind(this));
+        this.showStoryRatingInput.checked = this.settings.showStoryRating;
     }
     minRatingChange(event) {
         const target = event.target;
         if (!(target instanceof HTMLInputElement))
             return;
         this.settings.minRating = parseInt(target.value);
+        this.settings.save();
+    }
+    showStoryRatingChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement))
+            return;
+        this.settings.showStoryRating = target.checked;
         this.settings.save();
     }
 }
@@ -541,7 +554,7 @@ class ReturnPikabuMinus {
         }
     }
     async processStoryElement(storyElem) {
-        const post = new PostElement(storyElem);
+        const post = new PostElement(storyElem, this.settings);
         const postData = await Pikabu.DataService.fetchStory(post.getId(), 1);
         post.setRating(postData.story.pluses, postData.story.rating, postData.story.minuses);
         if (this.isStoryPage) {
