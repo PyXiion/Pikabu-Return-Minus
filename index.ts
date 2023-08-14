@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4
+// @version      0.4.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -412,6 +412,13 @@ const EXTRA_CSS = `
 
 .story__rating-minus .story__rating-count {
   padding: 0 1px 0 10px;
+}
+
+.story__footer-rating {
+  position: relative;
+}
+.story__footer-rating .pikabu-rating-bar-vertical {
+  left: -8px;
 }`;
 
 //#endregion

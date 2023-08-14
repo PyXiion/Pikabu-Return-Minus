@@ -62,3 +62,10 @@
 .story__rating-minus .story__rating-count {
   padding: 0 1px 0 10px;
 }
+
+.story__footer-rating {
+  position: relative;
+}
+.story__footer-rating .pikabu-rating-bar-vertical {
+  left: -8px;
+}
