@@ -278,6 +278,7 @@ const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 
 const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID = "show-story-rating";
+const DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID = "update-comments";
 
 const DOM_STORY_QUERY = "article.story"
 const DOM_STORY_LEFT_SIDEBAR_CLASS_QUERY = ".story__left";
@@ -315,7 +316,7 @@ const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating
 const HTML_SRC_MOBILE_STORY_BUTTON_MINUS = '<span class="story__rating-count">${minuses}</span><span type="button" class="tool story__rating-down" data-role="rating-down"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story"><use xlink:href="#icon--ui__rating-down"></use></svg></span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
-const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать рейтинг у постов</label></div><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
+const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
 
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
 HTML_STORY_MINUSES_RATING.className = "story__rating-count";
@@ -427,6 +428,7 @@ class Settings
 {
   public minRating: number = 0;
   public showStoryRating: boolean = true;
+  public updateComments: boolean = true;
 
   public save(): void
   {
@@ -732,11 +734,14 @@ class CommentElement implements ElementWithRating
 
 class SidebarElement
 {
+  // TODO: functions addTextInput, addBoolean and etc
+
   private settings: Settings;
   private sidebarElem: HTMLElement; 
   
   private minRatingInput: HTMLInputElement;
   private showStoryRatingInput: HTMLInputElement;
+  private updateCommentsInput: HTMLInputElement;
 
   public constructor(settings: Settings, isMobile: boolean)
   {
@@ -764,6 +769,10 @@ class SidebarElement
     this.showStoryRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID) as HTMLInputElement;
     this.showStoryRatingInput.addEventListener("change", this.showStoryRatingChange.bind(this));
     this.showStoryRatingInput.checked = this.settings.showStoryRating;
+
+    this.updateCommentsInput = document.getElementById(DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID) as HTMLInputElement;
+    this.updateCommentsInput.addEventListener("change", this.updateCommentsChange.bind(this));
+    this.updateCommentsInput.checked = this.settings.updateComments;
   }
 
   private minRatingChange(event: Event)
@@ -783,6 +792,16 @@ class SidebarElement
       return;
 
     this.settings.showStoryRating = target.checked;
+    this.settings.save();
+  }
+
+  private updateCommentsChange(event: Event)
+  {
+    const target = event.target;
+    if (! (target instanceof HTMLInputElement))
+      return;
+
+    this.settings.updateComments = target.checked;
     this.settings.save();
   }
 }
@@ -917,7 +936,7 @@ class ReturnPikabuMinus
 
     post.setRating(postData.story.pluses, postData.story.rating, postData.story.minuses);
 
-    if (this.isStoryPage)
+    if (this.isStoryPage && this.settings.updateComments)
     {
       await this.processStoryComments(postData);
     }
