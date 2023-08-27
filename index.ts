@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.3
+// @version      0.4.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -814,7 +814,7 @@ class ReturnPikabuMinus
   private mutationObserver: MutationObserver;
 
   private isMobile: boolean;
-  private isFeed: boolean;
+  private isMustFilterByRating: boolean;
   private isStoryPage: boolean;
 
   public constructor()
@@ -823,7 +823,7 @@ class ReturnPikabuMinus
 
     this.commentsToUpdate = [];
     this.isStoryPage = window.location.href.includes("/story/");
-    this.isFeed = /^https?:\/\/pikabu.ru\/(|best|new|subs|communities|companies)$/.test(window.location.href);
+    this.isMustFilterByRating = /^https?:\/\/pikabu.ru\/(|best|new|communities|companies)$/.test(window.location.href);
   }
 
   private addStyle(css: string)
@@ -940,7 +940,7 @@ class ReturnPikabuMinus
     {
       await this.processStoryComments(postData);
     }
-    else if (this.isFeed)
+    else if (this.isMustFilterByRating)
     {
       if (postData.story.rating < this.settings.minRating)
       {
