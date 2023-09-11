@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.4
+// @version      0.4.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -278,6 +278,7 @@ const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 
 const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID = "show-story-rating";
+const DOM_CUSTOM_SIDEBAR_SHOW_RATING_RATIO_INPUT_ID = "show-rating-ratio";
 const DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID = "update-comments";
 
 const DOM_STORY_QUERY = "article.story"
@@ -316,8 +317,7 @@ const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating
 const HTML_SRC_MOBILE_STORY_BUTTON_MINUS = '<span class="story__rating-count">${minuses}</span><span type="button" class="tool story__rating-down" data-role="rating-down"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story"><use xlink:href="#icon--ui__rating-down"></use></svg></span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
-const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><p class="profile-info__hint"><a href="https://t.me/return_pikabu">Телеграм-канал скрипта</a></p></details></div>';
-
+const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="show-rating-ratio" id="show-rating-ratio"><label for="show-rating-ratio">Показывать соотношение рейтинга</label></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><a class="social-icon social-icon_square" href="https://t.me/return_pikabu" data-type="telegram"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg></a></details></div>'
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
 HTML_STORY_MINUSES_RATING.className = "story__rating-count";
 
@@ -429,6 +429,7 @@ class Settings
   public minRating: number = 0;
   public showStoryRating: boolean = true;
   public updateComments: boolean = true;
+  public showRatingRatio: boolean = true;
 
   public save(): void
   {
@@ -546,7 +547,8 @@ class PostElement implements ElementWithRating
       this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY)
     }
 
-    this.addRatingBar();
+    if (this.settings.showRatingRatio)
+      this.addRatingBar();
     this.isEdited = true;
   }
 
@@ -583,7 +585,7 @@ class PostElement implements ElementWithRating
     if (this.settings.showStoryRating)
       this.ratingCounter.innerText = `${rating}`;
 
-    if (pluses + minuses !== 0)
+    if (pluses + minuses !== 0 && this.settings.showRatingRatio)
       this.updateRatingBar(pluses / (pluses + minuses))
   }
 
@@ -595,6 +597,8 @@ class PostElement implements ElementWithRating
 
 class CommentElement implements ElementWithRating
 {
+  private settings: Settings;
+
   private commentElem: HTMLElement;
   private headerElem: HTMLElement;
   private bodyElem: HTMLElement;
@@ -615,9 +619,10 @@ class CommentElement implements ElementWithRating
   private isEdited: boolean;
   private isOwn: boolean;
 
-  public constructor(commentElem: HTMLElement)
+  public constructor(commentElem: HTMLElement, settings: Settings)
   {
     this.commentElem = commentElem;
+    this.settings = settings;
 
     this.parseAndModify();
   }
@@ -686,7 +691,8 @@ class CommentElement implements ElementWithRating
     this.ratingCounterElem = this.ratingElem;
     this.ratingDownCounterElem = this.ratingDownElem.querySelector(DOM_COMMENT_HEADER_RATING_CLASS_QUERY);
 
-    this.addRatingBar();
+    if (this.settings.showRatingRatio)
+      this.addRatingBar();
 
     this.isEdited = true;
   }
@@ -720,16 +726,16 @@ class CommentElement implements ElementWithRating
     this.ratingCounterElem.innerText = `${rating}`;
     this.ratingDownCounterElem.innerText = `${-minuses}`;
 
-    if (pluses + minuses !== 0)
+    if (pluses + minuses !== 0 && this.settings.showRatingRatio)
       this.updateRatingBar(pluses / (pluses + minuses));
   }
 
-  public static getById(commentId: string | number)
-  {
-    const commentElem = document.getElementById(DOM_COMMENT_ID + commentId);
+  // public static getById(commentId: string | number)
+  // {
+  //   const commentElem = document.getElementById(DOM_COMMENT_ID + commentId);
 
-    return (commentElem !== null) ? new CommentElement(commentElem) : null;
-  }
+  //   return (commentElem !== null) ? new CommentElement(commentElem, settings) : null;
+  // }
 }
 
 class SidebarElement
@@ -741,6 +747,7 @@ class SidebarElement
   
   private minRatingInput: HTMLInputElement;
   private showStoryRatingInput: HTMLInputElement;
+  private showRatingRatioInput: HTMLInputElement;
   private updateCommentsInput: HTMLInputElement;
 
   public constructor(settings: Settings, isMobile: boolean)
@@ -767,8 +774,12 @@ class SidebarElement
     this.minRatingInput.value = `${this.settings.minRating}`;
 
     this.showStoryRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID) as HTMLInputElement;
-    this.showStoryRatingInput.addEventListener("change", this.showStoryRatingChange.bind(this));
+    this.showStoryRatingInput.addEventListener("change", this.updateCheckboxChange.bind(this, (x: boolean) => this.settings.showStoryRating = x));
     this.showStoryRatingInput.checked = this.settings.showStoryRating;
+
+    this.showRatingRatioInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_RATING_RATIO_INPUT_ID) as HTMLInputElement;
+    this.showRatingRatioInput.addEventListener("change", this.updateCheckboxChange.bind(this, (x: boolean) => this.settings.showRatingRatio = x));
+    this.showRatingRatioInput.checked = this.settings.showRatingRatio;
 
     this.updateCommentsInput = document.getElementById(DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID) as HTMLInputElement;
     this.updateCommentsInput.addEventListener("change", this.updateCommentsChange.bind(this));
@@ -785,13 +796,13 @@ class SidebarElement
     this.settings.save();
   }
 
-  private showStoryRatingChange(event: Event)
+  private updateCheckboxChange(setter: (v: boolean) => void, event: Event)
   {
     const target = event.target;
     if (! (target instanceof HTMLInputElement))
       return;
 
-    this.settings.showStoryRating = target.checked;
+    setter(target.checked);
     this.settings.save();
   }
 
@@ -914,7 +925,7 @@ class ReturnPikabuMinus
       return false;
     }
 
-    const commentElem = new CommentElement(commentHtmlElem);
+    const commentElem = new CommentElement(commentHtmlElem, this.settings);
     commentElem.setRating(comment.pluses, comment.rating, comment.minuses);
 
     return true;
