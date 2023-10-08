@@ -49,9 +49,16 @@
       </div>
 
       <div>
+        <label for="pluses-ratio">Минимальный % плюсов, работает при 100 и более оценках у поста. Установите на 0 для отключения</label>
+        <input type="range" min="0" max="95" name="pluses-ratio" id="pluses-ratio" step="0.5"/>
+        <p id="pluses-ratio-show"></p>
+      </div>
+
+      <div>
         <input type="checkbox" name="update-comments" id="update-comments"/>
         <label for="update-comments">Обрабатывать рейтинг комментариев</label>
       </div>
+      
       
       <a class="social-icon social-icon_square" href="https://t.me/return_pikabu" data-type="telegram">
         <svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__telegram">

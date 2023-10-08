@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.5
+// @version      0.4.6
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -280,6 +280,8 @@ const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID = "show-story-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_RATING_RATIO_INPUT_ID = "show-rating-ratio";
 const DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID = "update-comments";
+const DOM_CUSTOM_SIDEBAR_MIN_PLUSES_RATIO_INPUT_ID = "pluses-ratio"
+const DOM_CUSTOM_SIDEBAR_MIN_PLUSES_RATIO_SHOW_ID = "pluses-ratio-show"
 
 const DOM_STORY_QUERY = "article.story"
 const DOM_STORY_LEFT_SIDEBAR_CLASS_QUERY = ".story__left";
@@ -312,12 +314,14 @@ const ATTRIBUTE_STORY_ID = "data-story-id";
 const ATTIRUBE_RATING_COUNT = "data-rating";
 const ATTIRUBE_MINUSES_COUNT = "data-minuses";
 
+const HTML_STORY_COLLAPSE_CLASS = "story_collapse"
+
 const HTML_SRC_STORY_RATING_BAR = '<div class="pikabu-rating-bar-vertical-pluses"></div>';
 const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating}</span>';
 const HTML_SRC_MOBILE_STORY_BUTTON_MINUS = '<span class="story__rating-count">${minuses}</span><span type="button" class="tool story__rating-down" data-role="rating-down"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story"><use xlink:href="#icon--ui__rating-down"></use></svg></span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-up icon--comments-next__rating-up_comments"><use xlink:href="#icon--comments-next__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">${-minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments-next__rating-down icon--comments-next__rating-down_comments"><use xlink:href="#icon--comments-next__rating-down"></use></svg>';
-const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="show-rating-ratio" id="show-rating-ratio"><label for="show-rating-ratio">Показывать соотношение рейтинга</label></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><a class="social-icon social-icon_square" href="https://t.me/return_pikabu" data-type="telegram"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg></a></details></div>'
+const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="show-rating-ratio" id="show-rating-ratio"><label for="show-rating-ratio">Показывать соотношение рейтинга</label></div><div><label for="pluses-ratio">Минимальный % плюсов, работает при 100 и более оценках у поста. Установите на 0 для отключения</label><input type="range" min="0" max="95" name="pluses-ratio" id="pluses-ratio" step="0.5"><span id="pluses-ratio-show"></span></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><a class="social-icon social-icon_square" href="https://t.me/return_pikabu" data-type="telegram"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg></a></details></div>'
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
 HTML_STORY_MINUSES_RATING.className = "story__rating-count";
 
@@ -430,6 +434,7 @@ class Settings
   public showStoryRating: boolean = true;
   public updateComments: boolean = true;
   public showRatingRatio: boolean = true;
+  public minPlusesRatio: number = 0.0;
 
   public save(): void
   {
@@ -493,6 +498,20 @@ class PostElement implements ElementWithRating
     }
 
     this.parseAndModify();
+  }
+
+  public setCollapsed(collapsed: boolean) 
+  {
+    if ((collapsed && this.storyElem.classList.contains(HTML_STORY_COLLAPSE_CLASS)) ||
+        (!collapsed && !this.storyElem.classList.contains(HTML_STORY_COLLAPSE_CLASS)))
+    {
+      return;
+    }
+    let collapseButton = this.storyElem.querySelector('.collapse-button') as HTMLElement;
+
+    if (collapseButton) {
+      collapseButton.click();
+    }
   }
 
   private parseAndModify()
@@ -750,6 +769,9 @@ class SidebarElement
   private showRatingRatioInput: HTMLInputElement;
   private updateCommentsInput: HTMLInputElement;
 
+  private minPlusesRatioInput: HTMLInputElement;
+  private minPlusesRatioShow: HTMLParagraphElement;
+
   public constructor(settings: Settings, isMobile: boolean)
   {
     this.settings = settings;
@@ -784,6 +806,13 @@ class SidebarElement
     this.updateCommentsInput = document.getElementById(DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID) as HTMLInputElement;
     this.updateCommentsInput.addEventListener("change", this.updateCommentsChange.bind(this));
     this.updateCommentsInput.checked = this.settings.updateComments;
+
+    this.minPlusesRatioInput = document.getElementById(DOM_CUSTOM_SIDEBAR_MIN_PLUSES_RATIO_INPUT_ID) as HTMLInputElement;
+    this.minPlusesRatioInput.addEventListener("change", this.minPlusesRationChange.bind(this));
+    this.minPlusesRatioShow = document.getElementById(DOM_CUSTOM_SIDEBAR_MIN_PLUSES_RATIO_SHOW_ID) as HTMLParagraphElement;
+
+    this.minPlusesRatioInput.value = settings.minPlusesRatio.toString();
+    this.minPlusesRatioShow.innerText = settings.minPlusesRatio.toFixed(2) + "%";
   }
 
   private minRatingChange(event: Event)
@@ -793,6 +822,17 @@ class SidebarElement
       return;
 
     this.settings.minRating = parseInt(target.value);
+    this.settings.save();
+  }
+  
+  private minPlusesRationChange(event: Event)
+  {
+    const target = event.target;
+    if (! (target instanceof HTMLInputElement))
+      return;
+
+    this.settings.minPlusesRatio = parseInt(target.value);
+    this.minPlusesRatioShow.innerText = parseFloat(target.value).toFixed(2) + "%";
     this.settings.save();
   }
 
@@ -956,6 +996,15 @@ class ReturnPikabuMinus
       if (postData.story.rating < this.settings.minRating)
       {
         storyElem.remove();
+      }
+      else
+      {
+        let total = postData.story.pluses + postData.story.minuses;
+        let ratio = postData.story.pluses / total * 100;
+        if (total >= 100 && ratio < this.settings.minPlusesRatio) {
+          console.log(postData.story.pluses, total, ratio, this.settings.minPlusesRatio)
+          post.setCollapsed(true);
+        }
       }
     }
   }
