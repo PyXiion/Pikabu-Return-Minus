@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.7
+// @version      0.4.8
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -183,7 +183,7 @@ var Pikabu;
 //#region Extension
 //#region Contants
 const URL_PARAMS_COMMENT_ID = "cid";
-const DOM_MAIN_QUERY = ".stories-feed__container, .main__inner";
+const DOM_MAIN_QUERY = ".app__content, .main__inner";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
