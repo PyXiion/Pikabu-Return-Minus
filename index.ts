@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.6
+// @version      0.4.7
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -272,7 +272,7 @@ namespace Pikabu
 //#region Contants
 const URL_PARAMS_COMMENT_ID = "cid";
 
-const DOM_MAIN_QUERY = ".main, .main__content";
+const DOM_MAIN_QUERY = ".stories-feed__container, .main__inner";
 const DOM_HEADER_QUERY = "header.header";
 const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 
@@ -428,6 +428,34 @@ const EXTRA_CSS = `
 
 //#endregion
 
+class LittleLogger {
+  public enabled: boolean = false;
+  private prefix: string;
+
+  public logMutations: boolean = false;
+
+  public constructor(prefix: string, enabled: boolean = false) {
+    this.prefix = prefix;
+    this.enabled = enabled;
+  }
+
+  public log(...msg: any[]) {
+    if (this.enabled) {
+      console.log(this.prefix, ...msg);
+    }
+  }
+
+  public mutations(...msg: any[]) {
+    if (this.logMutations) {
+      this.log(...msg);
+    }
+  }
+}
+
+var logger = new LittleLogger("[PRM]", false);
+
+logger.logMutations = true;
+
 class Settings
 {
   public minRating: number = 0;
@@ -438,11 +466,13 @@ class Settings
 
   public save(): void
   {
+    logger.log("Сохранение настроек.")
     GM.setValue("settings", JSON.stringify(this));
   }
 
   public static async load(): Promise<Settings>
   {
+    logger.log("Загрузка настроек.")
     const settings = await GM.getValue("settings");
     if (settings === undefined || settings === null || typeof settings !== "string")
       return new Settings();
@@ -483,6 +513,7 @@ class PostElement implements ElementWithRating
 
   public constructor(storyElem: HTMLElement, settings: Settings)
   {
+    logger.log("Вызван конструктор элемента поста", storyElem)
     this.storyElem = storyElem;
     this.settings = settings;
 
@@ -502,6 +533,7 @@ class PostElement implements ElementWithRating
 
   public setCollapsed(collapsed: boolean) 
   {
+    logger.log("Пост", this.id, "скрыт.")
     if ((collapsed && this.storyElem.classList.contains(HTML_STORY_COLLAPSE_CLASS)) ||
         (!collapsed && !this.storyElem.classList.contains(HTML_STORY_COLLAPSE_CLASS)))
     {
@@ -516,6 +548,7 @@ class PostElement implements ElementWithRating
 
   private parseAndModify()
   {
+    logger.log("Пост", this.id, "модифицирован.")
     if (PostElement.isMobile)
     {
       this.ratingBlockElem = this.storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
@@ -569,10 +602,13 @@ class PostElement implements ElementWithRating
     if (this.settings.showRatingRatio)
       this.addRatingBar();
     this.isEdited = true;
+
+    this.ratingBarElem.style.backgroundColor = "#ff000";
   }
 
   private addRatingBar()
   {
+    logger.log("К посту", this.id, "добавлено соотношение рейтинга.")
     this.ratingBarElem = HTML_STORY_RATING_BAR.cloneNode(true) as HTMLElement;
     this.ratingBarInnerElem = this.ratingBarElem.firstChild as HTMLElement;
 
@@ -587,6 +623,7 @@ class PostElement implements ElementWithRating
    */
   private updateRatingBar(ratio: number)
   {
+    logger.log("У поста", this.id, "обновлено соотношение рейтинга", ratio)
     // show element
     this.ratingBarElem.style.display = "";
 
@@ -597,6 +634,8 @@ class PostElement implements ElementWithRating
   public setRating(pluses: number, rating: number, minuses: number): void {
     if (!this.isEdited)
       return;
+
+    logger.log("У поста ", this.id, " установлен новый рейтинг", pluses)
     
     this.ratingUpCounter.innerText = `${pluses}`;
     this.ratingDownCounter.innerText = `${-minuses}`;
@@ -640,6 +679,7 @@ class CommentElement implements ElementWithRating
 
   public constructor(commentElem: HTMLElement, settings: Settings)
   {
+    logger.log("Вызван конструктор элемента коммента", commentElem)
     this.commentElem = commentElem;
     this.settings = settings;
 
@@ -648,6 +688,7 @@ class CommentElement implements ElementWithRating
 
   private parseAndModify()
   {
+    logger.log("Коммент", this.commentElem, "модицирован.")
     this.bodyElem = this.commentElem.querySelector(DOM_COMMENT_BODY_CLASS_QUERY);
     this.headerElem = this.bodyElem.querySelector(DOM_COMMENT_HEADER_CLASS_QUERY);
 
@@ -718,6 +759,7 @@ class CommentElement implements ElementWithRating
 
   private addRatingBar()
   {
+    logger.log("К комментарию", this.commentElem, " добавлено соотношение рейтинга.")
     this.ratingBarElem = HTML_COMMENT_RATING_BAR.cloneNode(true) as HTMLElement;
     this.ratingBarInnerElem = this.ratingBarElem.firstChild as HTMLElement;
     // hide the element until the ratio is set
@@ -731,6 +773,7 @@ class CommentElement implements ElementWithRating
    */
   private updateRatingBar(ratio: number)
   {
+    logger.log("У комментария", this.commentElem, " обновлено соотношение рейтинга", ratio)
     // show the element
     this.ratingBarElem.style.display = "block";
     this.ratingBarInnerElem.style.height = `${ratio * 100}%`
@@ -741,6 +784,7 @@ class CommentElement implements ElementWithRating
     if (!this.isEdited)
       return;
     
+    logger.log("У комментария", this.commentElem, " установлен новый рейтинг", pluses, rating, minuses)
     this.ratingUpCounterElem.innerText = `${pluses}`; // no need
     this.ratingCounterElem.innerText = `${rating}`;
     this.ratingDownCounterElem.innerText = `${-minuses}`;
@@ -870,6 +914,7 @@ class ReturnPikabuMinus
 
   public constructor()
   {
+    logger.log("Привет.")
     window.addEventListener("load", this.onLoad.bind(this));
 
     this.commentsToUpdate = [];
@@ -879,6 +924,7 @@ class ReturnPikabuMinus
 
   private addStyle(css: string)
   {
+    logger.log("Добавляю стили.")
     const styleSheet = document.createElement("style");
     styleSheet.innerText = css;
     // is added to the end of the body because it must override some of the original styles
@@ -887,6 +933,7 @@ class ReturnPikabuMinus
 
   private async onLoad()
   {
+    logger.log("Страничка загрузилась")
     this.addStyle(EXTRA_CSS);
     this.settings = await Settings.load();
     this.isMobile = this.checkIsMobile();
@@ -895,8 +942,9 @@ class ReturnPikabuMinus
     this.sidebar = new SidebarElement(this.settings, this.isMobile);
 
     this.mutationObserver = new MutationObserver(this.observeMutations.bind(this));
-    const mainElem = document.querySelector(DOM_MAIN_QUERY);
+    let mainElem = document.querySelector(DOM_MAIN_QUERY);
 
+    logger.log("Наблюдаем посты в", mainElem);
     this.mutationObserver.observe(mainElem, {
       childList: true,
       subtree: true
@@ -914,23 +962,30 @@ class ReturnPikabuMinus
       const scriptSrc = scriptElements[i].src;
       if (scriptSrc) {
         if (scriptSrc.includes('mobile')) {
+          logger.log("Это мобильная версия.")
           return true;
         }
       }
     }
 
+    logger.log("Это ПК версия.")
     return false;
   }
 
   private observeMutations(mutations: MutationRecord[], observer: MutationObserver)
   {
+    logger.log("Смотрим мутации...")
+
     let commentAdded: boolean = false;
     for (const mutation of mutations)
     {
+      logger.mutations(mutation);
       for (const node of mutation.addedNodes)
       {
         if (!(node instanceof HTMLElement)) 
           continue;
+
+        logger.mutations(node);
 
         // It is the header that is checked, since the comment may be in 
         // the loading state (at this time the header will be absent)
@@ -938,25 +993,38 @@ class ReturnPikabuMinus
         {
           commentAdded = true;
         }
-        else if (node.matches(DOM_STORY_QUERY))
+        else if (node.matches(DOM_STORY_QUERY) || node.matches(DOM_STORY_RATING_BLOCK_CLASS_QUERY))
         {
-          this.processStoryElement(node);
+          try 
+          {
+            logger.log("Нашёл новый пост.")
+            this.processStoryElement(node);
+          }
+          catch (error)
+          {
+            console.error(error); // do nothing ¯\_(ツ)_/¯
+          }
         }
       }
     }
 
     if (commentAdded)
+    {
+      logger.log("Нашёл новые комменты.")
       this.processCachedComments();
+    }
   }
 
   private async processCachedComments()
   {
+    logger.log("Используем комменты из кэша...")
     const results = await Promise.all(this.commentsToUpdate.map(this.processComment.bind(this)));
     this.commentsToUpdate = this.commentsToUpdate.filter((_v, index) => ! results[index])
   }
 
   private async processComment(comment: Pikabu.Comment): Promise<boolean>
   {
+    logger.log("Обновляю коммент", comment.id)
     const commentHtmlElem = document.getElementById(DOM_COMMENT_ID + comment.id);
 
     if (commentHtmlElem === null)
@@ -973,15 +1041,21 @@ class ReturnPikabuMinus
 
   private processStaticPosts()
   {
+    logger.log("Обновляю посты, которые уже встроены в страницу...")
     const posts = document.querySelectorAll(DOM_STORY_QUERY);
     for (const post of posts)
     {
-      this.processStoryElement(post as HTMLElement);
+      try {
+        this.processStoryElement(post as HTMLElement);
+      } catch (e) {
+        console.error(e); // do nothing
+      }
     }
   }
 
   private async processStoryElement(storyElem: HTMLElement)
   {
+    logger.log("Обновляю пост", storyElem)
     const post = new PostElement(storyElem, this.settings);
     const postData = await Pikabu.DataService.fetchStory(post.getId(), 1);
 
@@ -989,12 +1063,14 @@ class ReturnPikabuMinus
 
     if (this.isStoryPage && this.settings.updateComments)
     {
+      logger.log("Нашёл комменты...")
       await this.processStoryComments(postData);
     }
     else if (this.isMustFilterByRating)
     {
       if (postData.story.rating < this.settings.minRating)
       {
+        logger.log("Рейтинг меньше допустимого. Удаляю.")
         storyElem.remove();
       }
       else
@@ -1002,6 +1078,7 @@ class ReturnPikabuMinus
         let total = postData.story.pluses + postData.story.minuses;
         let ratio = postData.story.pluses / total * 100;
         if (total >= 100 && ratio < this.settings.minPlusesRatio) {
+          logger.log("Соотношение плюсов и минусов меньше допустимого. Скрываю.")
           console.log(postData.story.pluses, total, ratio, this.settings.minPlusesRatio)
           post.setCollapsed(true);
         }
@@ -1011,6 +1088,7 @@ class ReturnPikabuMinus
 
   private async processStoryComments(commentsData: Pikabu.CommentsData)
   {
+    logger.log("Обрабатываю комменты этого поста...")
     const storyId = commentsData.story.id;
     let page = 1;
     while (commentsData.comments.length > 0)
