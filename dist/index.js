@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.8
+// @version      0.4.9
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -423,7 +423,6 @@ class PostElement {
         if (this.settings.showRatingRatio)
             this.addRatingBar();
         this.isEdited = true;
-        this.ratingBarElem.style.backgroundColor = "#ff000";
     }
     addRatingBar() {
         logger.log("К посту", this.id, "добавлено соотношение рейтинга.");
@@ -431,6 +430,7 @@ class PostElement {
         this.ratingBarInnerElem = this.ratingBarElem.firstChild;
         // hide the element until the ratio is set
         this.ratingBarElem.style.display = "none";
+        this.ratingBarElem.style.backgroundColor = "#ff000";
         this.ratingBlockElem.prepend(this.ratingBarElem);
     }
     /**
