@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.10
+// @version      0.4.11
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -278,6 +278,7 @@ const DOM_SIDEBAR_QUERY = ".sidebar-block.sidebar-block_border";
 
 const DOM_CUSTOM_SIDEBAR_MIN_RATING_INPUT_ID = "min-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID = "show-story-rating";
+const DOM_CUSTOM_SIDEBAR_SHOW_COMMENT_RATING_INPUT_ID = "show-comment-rating";
 const DOM_CUSTOM_SIDEBAR_SHOW_RATING_RATIO_INPUT_ID = "show-rating-ratio";
 const DOM_CUSTOM_SIDEBAR_UPDATE_COMMENTS_INPUT_ID = "update-comments";
 const DOM_CUSTOM_SIDEBAR_MIN_PLUSES_RATIO_INPUT_ID = "pluses-ratio"
@@ -321,7 +322,7 @@ const HTML_SRC_MOBILE_STORY_RATING = '<span class="story__rating-count">${rating
 const HTML_SRC_MOBILE_STORY_BUTTON_MINUS = '<span class="story__rating-count">${minuses}</span><span type="button" class="tool story__rating-down" data-role="rating-down"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story"><use xlink:href="#icon--ui__rating-down"></use></svg></span>';
 const HTML_SRC_COMMENT_BUTTON_UP = '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments__rating-up icon--comments__rating-up_comments"><use xlink:href="#icon--comments__rating-up"></use></svg><div class="comment__rating-count">${pluses}</div>';
 const HTML_SRC_COMMENT_BUTTON_DOWN = '<div class="comment__rating-count">-${minuses}</div><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--comments__rating-down icon--comments__rating-down_comments"><use xlink:href="#icon--comments__rating-down"></use></svg>';
-const HTML_SRC_SIDEBAR = '<div class="sidebar-block__content"><details><summary>Return Pikabu Minus</summary><label for="rating">Минимальный рейтинг:</label><input type="number" id="min-rating" name="rating" value="0" step="10" class="input input_editor profile-block input__box settings-main__label" min="-100" max="300"><div><input type="checkbox" name="show-story-rating" id="show-story-rating"><label for="show-story-rating">Показывать суммарный рейтинг у постов</label></div><div><input type="checkbox" name="show-rating-ratio" id="show-rating-ratio"><label for="show-rating-ratio">Показывать соотношение рейтинга</label></div><div><label for="pluses-ratio">Минимальный % плюсов, работает при 100 и более оценках у поста. Установите на 0 для отключения</label><input type="range" min="0" max="95" name="pluses-ratio" id="pluses-ratio" step="0.5"><span id="pluses-ratio-show"></span></div><div><input type="checkbox" name="update-comments" id="update-comments"><label for="update-comments">Обрабатывать рейтинг комментариев</label></div><a class="social-icon social-icon_square" href="https://t.me/return_pikabu" data-type="telegram"><svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg></a></details></div>'
+const HTML_SRC_SIDEBAR = '<div class=sidebar-block__content><details><summary>Return Pikabu Minus</summary><label for=rating>Минимальный рейтинг:</label> <input id=min-rating name=rating type=number max=300 min=-100 step=10 class="input input__box input_editor profile-block settings-main__label"value=0><div><input id=show-story-rating name=show-story-rating type=checkbox> <label for=show-story-rating>Показывать суммарный рейтинг у постов</label></div><div><input id=show-comment-rating name=show-comment-rating type=checkbox> <label for=show-comment-rating>Показывать суммарный рейтинг у комментариев</label></div><div><input id=show-rating-ratio name=show-rating-ratio type=checkbox> <label for=show-rating-ratio>Показывать соотношение рейтинга</label></div><div><label for=pluses-ratio>Минимальный % плюсов, работает при 100 и более оценках у поста. Установите на 0 для отключения</label> <input id=pluses-ratio name=pluses-ratio type=range max=95 min=0 step=0.5><p id=pluses-ratio-show></div><div><input id=update-comments name=update-comments type=checkbox> <label for=update-comments>Обрабатывать рейтинг комментариев</label></div><a class="social-icon social-icon_square"data-type=telegram href=https://t.me/return_pikabu><svg class="icon icon--social__telegram"xmlns=http://www.w3.org/2000/svg><use xlink:href=#icon--social__telegram></use></svg></a></details></div>'
 const HTML_STORY_MINUSES_RATING = document.createElement("div");
 HTML_STORY_MINUSES_RATING.className = "story__rating-count";
 
@@ -460,6 +461,7 @@ class Settings
 {
   public minRating: number = 0;
   public showStoryRating: boolean = true;
+  public showCommentRating: boolean = true;
   public updateComments: boolean = true;
   public showRatingRatio: boolean = true;
   public minPlusesRatio: number = 0.0;
@@ -718,17 +720,24 @@ class CommentElement implements ElementWithRating
         ratingCountElem.remove();
     }
 
-    if (this.isEdited)
-      this.ratingElem = this.ratingBlockElem.querySelector(DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY);
-    else
-      this.ratingElem = HTML_COMMENT_RATING.cloneNode(true) as HTMLElement;
+    if (this.settings.showCommentRating) 
+    {
+      if (this.isEdited)
+        this.ratingElem = this.ratingBlockElem.querySelector(DOM_COMMENT_HEADER_RATING_TOTAL_CLASS_QUERY);
+      else
+        this.ratingElem = HTML_COMMENT_RATING.cloneNode(true) as HTMLElement;
+    }
     
     if (this.isOwn && !this.isEdited)
     {
       // create new buttons and counter
       this.ratingUpElem = HTML_COMMENT_BUTTON_UP.cloneNode(true) as HTMLElement;
       this.ratingDownElem = HTML_COMMENT_BUTTON_DOWN.cloneNode(true) as HTMLElement;
-      this.ratingBlockElem.prepend(this.ratingUpElem, this.ratingElem, this.ratingDownElem)
+
+      if (this.settings.showCommentRating)
+        this.ratingBlockElem.prepend(this.ratingUpElem, this.ratingElem, this.ratingDownElem)
+      else
+        this.ratingBlockElem.prepend(this.ratingUpElem, this.ratingDownElem)
     }
     else
     {
@@ -739,7 +748,10 @@ class CommentElement implements ElementWithRating
       if (!this.isEdited)
       {
         // add counter
-        this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
+        if (this.settings.showCommentRating)
+          this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
+        else
+          this.ratingBlockElem.insertBefore(this.ratingUpElem, this.ratingDownElem);
 
         this.ratingUpElem.innerHTML = HTML_SRC_COMMENT_BUTTON_UP;
         this.ratingDownElem.innerHTML = HTML_SRC_COMMENT_BUTTON_DOWN;
@@ -747,7 +759,8 @@ class CommentElement implements ElementWithRating
     }
 
     this.ratingUpCounterElem = this.ratingUpElem.querySelector(DOM_COMMENT_HEADER_RATING_CLASS_QUERY);
-    this.ratingCounterElem = this.ratingElem;
+    if (this.settings.showCommentRating)
+      this.ratingCounterElem = this.ratingElem;
     this.ratingDownCounterElem = this.ratingDownElem.querySelector(DOM_COMMENT_HEADER_RATING_CLASS_QUERY);
 
     if (this.settings.showRatingRatio)
@@ -785,7 +798,8 @@ class CommentElement implements ElementWithRating
     
     logger.log("У комментария", this.commentElem, " установлен новый рейтинг", pluses, rating, minuses)
     this.ratingUpCounterElem.innerText = `${pluses}`; // no need
-    this.ratingCounterElem.innerText = `${rating}`;
+    if (this.settings.showCommentRating)
+      this.ratingCounterElem.innerText = `${rating}`;
     this.ratingDownCounterElem.innerText = `${-minuses}`;
 
     if (pluses + minuses !== 0 && this.settings.showRatingRatio)
@@ -809,6 +823,7 @@ class SidebarElement
   
   private minRatingInput: HTMLInputElement;
   private showStoryRatingInput: HTMLInputElement;
+  private showCommentRatingInput: HTMLInputElement;
   private showRatingRatioInput: HTMLInputElement;
   private updateCommentsInput: HTMLInputElement;
 
@@ -820,7 +835,7 @@ class SidebarElement
     this.settings = settings;
 
     this.sidebarElem = document.createElement("div");
-    this.sidebarElem.className = "sidebar-block sidebar-block_border sidebar-block__content menu menu_vertical";
+    this.sidebarElem.className = "sidebar-block sidebar-block_border menu";
     this.sidebarElem.innerHTML = HTML_SRC_SIDEBAR;
 
     if (isMobile)
@@ -841,6 +856,10 @@ class SidebarElement
     this.showStoryRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_STORY_RATING_INPUT_ID) as HTMLInputElement;
     this.showStoryRatingInput.addEventListener("change", this.updateCheckboxChange.bind(this, (x: boolean) => this.settings.showStoryRating = x));
     this.showStoryRatingInput.checked = this.settings.showStoryRating;
+
+    this.showCommentRatingInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_COMMENT_RATING_INPUT_ID) as HTMLInputElement;
+    this.showCommentRatingInput.addEventListener("change", this.updateCheckboxChange.bind(this, (x: boolean) => this.settings.showCommentRating = x));
+    this.showCommentRatingInput.checked = this.settings.showCommentRating;
 
     this.showRatingRatioInput = document.getElementById(DOM_CUSTOM_SIDEBAR_SHOW_RATING_RATIO_INPUT_ID) as HTMLInputElement;
     this.showRatingRatioInput.addEventListener("change", this.updateCheckboxChange.bind(this, (x: boolean) => this.settings.showRatingRatio = x));
