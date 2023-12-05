@@ -1,6 +1,3 @@
-.story__rating-down:hover .story__rating-count {
-  color:var(--color-danger-800)
-}
 .story__rating-count {
   margin: 7px 0 7px;
 }
@@ -12,6 +9,13 @@
 }
 .comment__rating-down {
   padding: 2px 8px;
+}
+
+.prm-summary-rating {
+  margin: 0 7px 0;
+}
+.prm-minuses {
+  margin-left: 7px;
 }
 
 .pikabu-rating-bar-vertical {
@@ -28,7 +32,6 @@
   background-color: var(--color-primary-700);
   border-radius: 15px;
 }
-
 .comment__body {
   position: relative;
 }
@@ -40,32 +43,4 @@
   left: -8px;
   top: 20px;
   max-height: 100px;
-}
-
-/* mobile only */
-.story__footer-rating .story__rating-minus {
-  background-color:var(--color-black-300);
-  border-radius:8px;
-  overflow:hidden;
-  padding:0;
-  display:flex;
-  align-items:center
-}
-
-.story__footer-rating .story__rating-down {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding-left:2px
-}
-
-.story__rating-minus .story__rating-count {
-  padding: 0 1px 0 10px;
-}
-
-.story__footer-rating {
-  position: relative;
-}
-.story__footer-rating .pikabu-rating-bar-vertical {
-  left: -8px;
 }

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.11
+// @version      0.4.12
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -355,9 +355,6 @@ HTML_COMMENT_BUTTON_DOWN.innerHTML = HTML_SRC_COMMENT_BUTTON_DOWN;
 const HTML_CUSTOM_SIDEBAR = document.createElement("div");
 
 const EXTRA_CSS = `
-.story__rating-down:hover .story__rating-count {
-  color:var(--color-danger-800)
-}
 .story__rating-count {
   margin: 7px 0 7px;
 }
@@ -369,6 +366,13 @@ const EXTRA_CSS = `
 }
 .comment__rating-down {
   padding: 2px 8px;
+}
+
+.prm-summary-rating {
+  margin: 0 7px 0;
+}
+.prm-minuses {
+  margin-left: 7px;
 }
 
 .pikabu-rating-bar-vertical {
@@ -385,7 +389,6 @@ const EXTRA_CSS = `
   background-color: var(--color-primary-700);
   border-radius: 15px;
 }
-
 .comment__body {
   position: relative;
 }
@@ -397,34 +400,6 @@ const EXTRA_CSS = `
   left: -8px;
   top: 20px;
   max-height: 100px;
-}
-
-/* mobile only */
-.story__footer-rating .story__rating-minus {
-  background-color:var(--color-black-300);
-  border-radius:8px;
-  overflow:hidden;
-  padding:0;
-  display:flex;
-  align-items:center
-}
-
-.story__footer-rating .story__rating-down {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding-left:2px
-}
-
-.story__rating-minus .story__rating-count {
-  padding: 0 1px 0 10px;
-}
-
-.story__footer-rating {
-  position: relative;
-}
-.story__footer-rating .pikabu-rating-bar-vertical {
-  left: -8px;
 }`;
 
 //#endregion
@@ -453,9 +428,9 @@ class LittleLogger {
   }
 }
 
-var logger = new LittleLogger("[PRM]", false);
+var logger = new LittleLogger("[PRM]", true);
 
-logger.logMutations = true;
+logger.logMutations = false;
 
 class Settings
 {
@@ -490,25 +465,21 @@ interface ElementWithRating
 
 class PostElement implements ElementWithRating
 {
-  public static isMobile: boolean = null;
-  
+  public static isMobile: boolean;
+
   private settings: Settings;
 
   private id: number;
   private storyElem: HTMLElement;
   private isEdited: boolean;
+  
+  private ratingElem: HTMLDivElement;
+  private ratingUpElem: HTMLDivElement;
+  private ratingDownElem: HTMLDivElement;
 
-  private ratingUpCounter: HTMLElement;
-  private ratingCounter: HTMLElement;
-  private ratingDownCounter: HTMLElement;
+  private ratingDownTextElem: HTMLDivElement = null;
 
-  private ratingBarElem: HTMLElement;
-  private ratingBarInnerElem: HTMLElement;
-
-  private ratingBlockElem: HTMLElement;
-  private ratingUpElem: HTMLElement;
-  private ratingElem: HTMLElement;
-  private ratingDownElem: HTMLElement;
+  private ratingSummaryTextElem: HTMLDivElement = null;
 
   // PC only
   private leftSidebarElem: HTMLElement;
@@ -522,13 +493,6 @@ class PostElement implements ElementWithRating
     this.id = parseInt(storyElem.getAttribute(ATTRIBUTE_STORY_ID));
     this.isEdited = storyElem.hasAttribute(ATTRIBUTE_MARK_EDITED);
     storyElem.setAttribute(ATTRIBUTE_MARK_EDITED, "true");
-
-    // check is mobile
-    if (PostElement.isMobile === null)
-    {
-      const ratingFooterElem = storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
-      PostElement.isMobile = ratingFooterElem !== null;
-    }
 
     this.parseAndModify();
   }
@@ -550,73 +514,29 @@ class PostElement implements ElementWithRating
 
   private parseAndModify()
   {
-    logger.log("Пост", this.id, "модифицирован.")
-    if (PostElement.isMobile)
-    {
-      this.ratingBlockElem = this.storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
-    }
-    else
-    {
-      this.leftSidebarElem = this.storyElem.querySelector(DOM_STORY_LEFT_SIDEBAR_CLASS_QUERY);
-      if (this.leftSidebarElem === null)
-        return;
+    this.ratingElem = this.storyElem.querySelector('.story__rating');
+    this.ratingUpElem = this.ratingElem.querySelector('.story__rating-up');
+    this.ratingDownElem = this.ratingElem.querySelector('.story__rating-down');
 
-      this.ratingBlockElem = this.leftSidebarElem.querySelector(DOM_STORY_RATING_BLOCK_CLASS_QUERY);
-    }
+    if (!this.isEdited) {
+      this.ratingDownTextElem = document.createElement('div');
+      this.ratingDownTextElem.classList.add('prm-minuses', 'story__rating-count');
+      this.ratingDownElem.prepend(this.ratingDownTextElem);
 
-    this.ratingUpElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_UP_CLASS_QUERY);
-    this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY);
-  
-    if (this.isEdited)
-    {
-      this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-      this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-      
-      if (this.settings.showStoryRating)
-        this.ratingCounter = this.ratingBlockElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
-    }
-    else
-    {
-      if (this.settings.showStoryRating)
-      {
-        this.ratingElem = HTML_STORY_RATING.cloneNode(true) as HTMLElement;
-        this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
-        this.ratingCounter = this.ratingElem;
+      if (this.settings.showStoryRating) {
+        this.ratingSummaryTextElem = document.createElement('div');
+        this.ratingSummaryTextElem.classList.add('prm-summary-rating', 'story__rating-count')
+        this.ratingElem.insertBefore(this.ratingSummaryTextElem, this.ratingDownElem)
       }
-
-      if (PostElement.isMobile)
-      {
-        const newButton = HTML_MOBILE_STORY_BUTTON_MINUS.cloneNode(true) as HTMLElement;
-        this.ratingDownElem.replaceWith(newButton);
-        this.ratingDownElem = newButton;
-
-        this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-      }
-      else 
-      {
-        this.ratingDownCounter = HTML_STORY_MINUSES_RATING.cloneNode(true) as HTMLElement;
-        this.ratingDownElem.prepend(this.ratingDownCounter);
-      }
-
-      this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY)
     }
 
-    if (this.settings.showRatingRatio)
-      this.addRatingBar();
     this.isEdited = true;
   }
 
   private addRatingBar()
   {
     logger.log("К посту", this.id, "добавлено соотношение рейтинга.")
-    this.ratingBarElem = HTML_STORY_RATING_BAR.cloneNode(true) as HTMLElement;
-    this.ratingBarInnerElem = this.ratingBarElem.firstChild as HTMLElement;
-
-    // hide the element until the ratio is set
-    this.ratingBarElem.style.display = "none";
-    this.ratingBarElem.style.backgroundColor = "#ff000";
-
-    this.ratingBlockElem.prepend(this.ratingBarElem);
+    // TODO
   }
 
   /**
@@ -625,11 +545,7 @@ class PostElement implements ElementWithRating
   private updateRatingBar(ratio: number)
   {
     logger.log("У поста", this.id, "обновлено соотношение рейтинга", ratio)
-    // show element
-    this.ratingBarElem.style.display = "";
-
-    ratio = Math.round(ratio * 100);
-    this.ratingBarInnerElem.style.height = `${ratio}%`
+    // TODO
   }
 
   public setRating(pluses: number, rating: number, minuses: number): void {
@@ -637,13 +553,10 @@ class PostElement implements ElementWithRating
       return;
 
     logger.log("У поста ", this.id, " установлен новый рейтинг", pluses)
+  
+    this.ratingDownTextElem.innerText = minuses.toString();
+    this.ratingSummaryTextElem.innerText = rating.toString();
     
-    this.ratingUpCounter.innerText = `${pluses}`;
-    this.ratingDownCounter.innerText = `${-minuses}`;
-    
-    if (this.settings.showStoryRating)
-      this.ratingCounter.innerText = `${rating}`;
-
     if (pluses + minuses !== 0 && this.settings.showRatingRatio)
       this.updateRatingBar(pluses / (pluses + minuses))
   }

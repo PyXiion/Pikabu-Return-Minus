@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.11
+// @version      0.4.12
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -246,9 +246,6 @@ HTML_COMMENT_BUTTON_DOWN.className = "comment__rating-down";
 HTML_COMMENT_BUTTON_DOWN.innerHTML = HTML_SRC_COMMENT_BUTTON_DOWN;
 const HTML_CUSTOM_SIDEBAR = document.createElement("div");
 const EXTRA_CSS = `
-.story__rating-down:hover .story__rating-count {
-  color:var(--color-danger-800)
-}
 .story__rating-count {
   margin: 7px 0 7px;
 }
@@ -260,6 +257,13 @@ const EXTRA_CSS = `
 }
 .comment__rating-down {
   padding: 2px 8px;
+}
+
+.prm-summary-rating {
+  margin: 0 7px 0;
+}
+.prm-minuses {
+  margin-left: 7px;
 }
 
 .pikabu-rating-bar-vertical {
@@ -276,7 +280,6 @@ const EXTRA_CSS = `
   background-color: var(--color-primary-700);
   border-radius: 15px;
 }
-
 .comment__body {
   position: relative;
 }
@@ -288,34 +291,6 @@ const EXTRA_CSS = `
   left: -8px;
   top: 20px;
   max-height: 100px;
-}
-
-/* mobile only */
-.story__footer-rating .story__rating-minus {
-  background-color:var(--color-black-300);
-  border-radius:8px;
-  overflow:hidden;
-  padding:0;
-  display:flex;
-  align-items:center
-}
-
-.story__footer-rating .story__rating-down {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding-left:2px
-}
-
-.story__rating-minus .story__rating-count {
-  padding: 0 1px 0 10px;
-}
-
-.story__footer-rating {
-  position: relative;
-}
-.story__footer-rating .pikabu-rating-bar-vertical {
-  left: -8px;
 }`;
 //#endregion
 class LittleLogger {
@@ -336,8 +311,8 @@ class LittleLogger {
         }
     }
 }
-var logger = new LittleLogger("[PRM]", false);
-logger.logMutations = true;
+var logger = new LittleLogger("[PRM]", true);
+logger.logMutations = false;
 class Settings {
     constructor() {
         this.minRating = 0;
@@ -361,17 +336,14 @@ class Settings {
 }
 class PostElement {
     constructor(storyElem, settings) {
+        this.ratingDownTextElem = null;
+        this.ratingSummaryTextElem = null;
         logger.log("Вызван конструктор элемента поста", storyElem);
         this.storyElem = storyElem;
         this.settings = settings;
         this.id = parseInt(storyElem.getAttribute(ATTRIBUTE_STORY_ID));
         this.isEdited = storyElem.hasAttribute(ATTRIBUTE_MARK_EDITED);
         storyElem.setAttribute(ATTRIBUTE_MARK_EDITED, "true");
-        // check is mobile
-        if (PostElement.isMobile === null) {
-            const ratingFooterElem = storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
-            PostElement.isMobile = ratingFooterElem !== null;
-        }
         this.parseAndModify();
     }
     setCollapsed(collapsed) {
@@ -386,73 +358,38 @@ class PostElement {
         }
     }
     parseAndModify() {
-        logger.log("Пост", this.id, "модифицирован.");
-        if (PostElement.isMobile) {
-            this.ratingBlockElem = this.storyElem.querySelector(DOM_MOBILE_STORY_RATING_FOOTER_CLASS_QUERY);
-        }
-        else {
-            this.leftSidebarElem = this.storyElem.querySelector(DOM_STORY_LEFT_SIDEBAR_CLASS_QUERY);
-            if (this.leftSidebarElem === null)
-                return;
-            this.ratingBlockElem = this.leftSidebarElem.querySelector(DOM_STORY_RATING_BLOCK_CLASS_QUERY);
-        }
-        this.ratingUpElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_UP_CLASS_QUERY);
-        this.ratingDownElem = this.ratingBlockElem.querySelector(DOM_STORY_RATING_BLOCK_DOWN_CLASS_QUERY);
-        if (this.isEdited) {
-            this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-            this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-            if (this.settings.showStoryRating)
-                this.ratingCounter = this.ratingBlockElem.querySelector(DOM_STORY_RATING_TOTAL_CLASS_QUERY);
-        }
-        else {
+        this.ratingElem = this.storyElem.querySelector('.story__rating');
+        this.ratingUpElem = this.ratingElem.querySelector('.story__rating-up');
+        this.ratingDownElem = this.ratingElem.querySelector('.story__rating-down');
+        if (!this.isEdited) {
+            this.ratingDownTextElem = document.createElement('div');
+            this.ratingDownTextElem.classList.add('prm-minuses', 'story__rating-count');
+            this.ratingDownElem.prepend(this.ratingDownTextElem);
             if (this.settings.showStoryRating) {
-                this.ratingElem = HTML_STORY_RATING.cloneNode(true);
-                this.ratingBlockElem.insertBefore(this.ratingElem, this.ratingDownElem);
-                this.ratingCounter = this.ratingElem;
+                this.ratingSummaryTextElem = document.createElement('div');
+                this.ratingSummaryTextElem.classList.add('prm-summary-rating', 'story__rating-count');
+                this.ratingElem.insertBefore(this.ratingSummaryTextElem, this.ratingDownElem);
             }
-            if (PostElement.isMobile) {
-                const newButton = HTML_MOBILE_STORY_BUTTON_MINUS.cloneNode(true);
-                this.ratingDownElem.replaceWith(newButton);
-                this.ratingDownElem = newButton;
-                this.ratingDownCounter = this.ratingDownElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
-            }
-            else {
-                this.ratingDownCounter = HTML_STORY_MINUSES_RATING.cloneNode(true);
-                this.ratingDownElem.prepend(this.ratingDownCounter);
-            }
-            this.ratingUpCounter = this.ratingUpElem.querySelector(DOM_STORY_RATING_COUNT_CLASS_QUERY);
         }
-        if (this.settings.showRatingRatio)
-            this.addRatingBar();
         this.isEdited = true;
     }
     addRatingBar() {
         logger.log("К посту", this.id, "добавлено соотношение рейтинга.");
-        this.ratingBarElem = HTML_STORY_RATING_BAR.cloneNode(true);
-        this.ratingBarInnerElem = this.ratingBarElem.firstChild;
-        // hide the element until the ratio is set
-        this.ratingBarElem.style.display = "none";
-        this.ratingBarElem.style.backgroundColor = "#ff000";
-        this.ratingBlockElem.prepend(this.ratingBarElem);
+        // TODO
     }
     /**
      * @param ratio from 0 to 1. pluses/total
      */
     updateRatingBar(ratio) {
         logger.log("У поста", this.id, "обновлено соотношение рейтинга", ratio);
-        // show element
-        this.ratingBarElem.style.display = "";
-        ratio = Math.round(ratio * 100);
-        this.ratingBarInnerElem.style.height = `${ratio}%`;
+        // TODO
     }
     setRating(pluses, rating, minuses) {
         if (!this.isEdited)
             return;
         logger.log("У поста ", this.id, " установлен новый рейтинг", pluses);
-        this.ratingUpCounter.innerText = `${pluses}`;
-        this.ratingDownCounter.innerText = `${-minuses}`;
-        if (this.settings.showStoryRating)
-            this.ratingCounter.innerText = `${rating}`;
+        this.ratingDownTextElem.innerText = minuses.toString();
+        this.ratingSummaryTextElem.innerText = rating.toString();
         if (pluses + minuses !== 0 && this.settings.showRatingRatio)
             this.updateRatingBar(pluses / (pluses + minuses));
     }
@@ -460,7 +397,6 @@ class PostElement {
         return this.id;
     }
 }
-PostElement.isMobile = null;
 class CommentElement {
     constructor(commentElem, settings) {
         logger.log("Вызван конструктор элемента коммента", commentElem);
