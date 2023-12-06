@@ -1,21 +1,11 @@
-.story__rating-count {
-  margin: 7px 0 7px;
-}
-.custom-comments-counter {
-  margin-right: 8px;
-}
-.comment__rating-down .comment__rating-count {
-  margin-right: 8px;
-}
-.comment__rating-down {
-  padding: 2px 8px;
-}
-
 .prm-summary-rating {
-  margin: 0 7px 0;
+  margin: 0 7px 0 !important;
 }
 .prm-minuses {
-  margin-left: 7px;
+  margin: 0 0 0 7px !important;
+}
+.story__rating-down {
+  margin-left: 0 !important;
 }
 
 .pikabu-rating-bar-vertical {
