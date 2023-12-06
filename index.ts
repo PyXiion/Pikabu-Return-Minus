@@ -365,6 +365,19 @@ const EXTRA_CSS = `
   margin-left: 0 !important;
 }
 
+.story__rating-count {
+  margin: 7px 0 7px;
+}
+.custom-comments-counter {
+  margin-right: 8px;
+}
+.comment__rating-down .comment__rating-count {
+  margin-right: 8px;
+}
+.comment__rating-down {
+  padding: 2px 8px;
+}
+
 .pikabu-rating-bar-vertical {
   position: absolute;
   right: -8px;
