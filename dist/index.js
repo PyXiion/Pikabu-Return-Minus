@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.4.14
+// @version      0.4.15
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -392,7 +392,8 @@ class PostElement {
             return;
         logger.log("У поста ", this.id, " установлен новый рейтинг", pluses);
         this.ratingDownTextElem.innerText = minuses.toString();
-        this.ratingSummaryTextElem.innerText = rating.toString();
+        if (this.ratingSummaryTextElem !== null)
+            this.ratingSummaryTextElem.innerText = rating.toString();
         if (pluses + minuses !== 0 && this.settings.showRatingRatio)
             this.updateRatingBar(pluses / (pluses + minuses));
     }
