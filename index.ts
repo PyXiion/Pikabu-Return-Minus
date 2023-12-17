@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5
+// @version      0.5.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -330,7 +330,7 @@ class CommentData {
 }
 
 const cachedComments = new Map<number, CommentData>();
-const oldInterface = null;
+let oldInterface = null;
 
 function processComment(comment: Pikabu.Comment | CommentData) {
   const commentElem = document.getElementById(`comment_${comment.id}`);
@@ -341,8 +341,7 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     return;
   }
 
-  const ratingElem = commentElem.querySelector('.comment__header');
-  const ratingDown = ratingElem.querySelector('.comment__rating-down');
+  const ratingDown = commentElem.querySelector('.comment__rating-down');
 
   const minusesText = document.createElement('div');
   minusesText.classList.add('comment__rating-count');
@@ -355,7 +354,7 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     summary.classList.add('comment__rating-count', 'rpm-summary-comment');
     summary.textContent = comment.rating.toString();
 
-    ratingElem.insertBefore(summary, ratingDown);
+    ratingDown.parentElement.insertBefore(summary, ratingDown);
   }
 }
 
@@ -373,16 +372,18 @@ async function processStoryComments(storyId: number, storyData: Pikabu.CommentsD
 function processOldStory(story: HTMLDivElement, storyData: Pikabu.CommentsData) {
   let ratingElem = story.querySelector('.story__footer-rating > div');
   let isMobile = false;
+
   if (ratingElem !== null) { // mobile
     isMobile = true;
   } else { // pc
-    ratingElem = story.querySelector('.story__left');
+    ratingElem = story.querySelector('.story__left .story__rating-block');
   }
   if (ratingElem === null) {
     return false;
   }
+  oldInterface = true;
 
-  const ratingDown = ratingElem.querySelector('.story__rating-minus, .story__rating-down');
+  let ratingDown = ratingElem.querySelector('.story__rating-minus, .story__rating-down');
   
   if (isMobile) {
     const buttonMinus = document.createElement('button');
@@ -396,6 +397,7 @@ function processOldStory(story: HTMLDivElement, storyData: Pikabu.CommentsData) 
     </span>`
 
     ratingDown.replaceWith(buttonMinus);
+    ratingDown = buttonMinus;
   } else {
     const minusesCounter = document.createElement('div');
     minusesCounter.classList.add('story__rating-count');
@@ -408,6 +410,8 @@ function processOldStory(story: HTMLDivElement, storyData: Pikabu.CommentsData) 
     const summary = document.createElement('div');
     summary.classList.add('story__rating-count')
     summary.textContent = storyData.story.rating.toString();
+
+    ratingDown.parentElement.insertBefore(summary, ratingDown);
   }
 
   processStoryComments(storyData.story.id, storyData, 1);
@@ -427,13 +431,19 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     return;
   }
 
+  if (oldInterface === true) {
+    processOldStory(story, storyData);
+    return;
+  }
+
   const ratingElem = story.querySelector('.story__rating');
   if (ratingElem === null) {
-    if (!processOldStory(story, storyData)) {
+    if (oldInterface === null && !processOldStory(story, storyData)) {
       console.warn('У поста нет элементов рейтинга.', story);
     }
     return;
   }
+  oldInterface = false;
   const ratingDown = ratingElem.querySelector('.story__rating-down');
 
   const minusesText = document.createElement('div');
@@ -461,6 +471,14 @@ async function processStories(stories: Iterable<HTMLDivElement>) {
   }
 }
 
+function processCached(commentElem: HTMLDivElement) {
+  const commentId = parseInt(commentElem.getAttribute('data-id'));
+  
+  if (commentId in cachedComments) {
+    processComment(cachedComments[commentId]);
+    delete cachedComments[commentId];
+  }
+}
 
 function mutationsListener(mutationList: MutationRecord[], observer: MutationObserver) {
   for (const mutation of mutationList) {
@@ -469,19 +487,14 @@ function mutationsListener(mutationList: MutationRecord[], observer: MutationObs
         continue;
 
       if (node.matches(".comment__header")) {
-        const commentElem = node.parentNode.parentNode as HTMLDivElement
-        const commentId = parseInt(commentElem.getAttribute('data-id'));
-        
-        if (commentId in cachedComments) {
-          processComment(cachedComments[commentId]);
-          delete cachedComments[commentId];
-        }
+        console.log(node)
+        const commentElem = node.closest('.comment') as HTMLDivElement;
+        processCached(commentElem);
       } else if (node.matches('article.story')) {
         const storyElem = node as HTMLDivElement;
         console.log(storyElem);
         processStory(storyElem, false);
       } else {
-        console.warn(node)
       }
     }
   }
@@ -515,13 +528,29 @@ async function main() {
   .comment__rating-down {
     padding: 2px 8px;
   }
-  `)
+  
+  /* old mobile interface */
+  .story__footer-rating .story__rating-minus {
+    background-color:var(--color-black-300);
+    border-radius:8px;
+    overflow:hidden;
+    padding:0;
+    display:flex;
+    align-items:center
+  }
+   
+  .story__footer-rating .story__rating-down {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding-left:2px
+  }`)
 
   // process static posts
   processStories(document.querySelectorAll("article.story"))
 
   observer = new MutationObserver(mutationsListener);
-  observer.observe(document.querySelector('.app__inner, .main__inner'), {
+  observer.observe(document.querySelector('.app__content, .main__inner'), {
     childList: true,
     subtree: true,
   })

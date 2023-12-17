@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5
+// @version      0.5.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -231,7 +231,7 @@ class CommentData {
     }
 }
 const cachedComments = new Map();
-const oldInterface = null;
+let oldInterface = null;
 function processComment(comment) {
     const commentElem = document.getElementById(`comment_${comment.id}`);
     if (commentElem === null) {
@@ -239,8 +239,7 @@ function processComment(comment) {
             cachedComments[comment.id] = new CommentData(comment);
         return;
     }
-    const ratingElem = commentElem.querySelector('.comment__header');
-    const ratingDown = ratingElem.querySelector('.comment__rating-down');
+    const ratingDown = commentElem.querySelector('.comment__rating-down');
     const minusesText = document.createElement('div');
     minusesText.classList.add('comment__rating-count');
     ratingDown.prepend(minusesText);
@@ -249,7 +248,7 @@ function processComment(comment) {
         const summary = document.createElement('div');
         summary.classList.add('comment__rating-count', 'rpm-summary-comment');
         summary.textContent = comment.rating.toString();
-        ratingElem.insertBefore(summary, ratingDown);
+        ratingDown.parentElement.insertBefore(summary, ratingDown);
     }
 }
 async function processStoryComments(storyId, storyData, page) {
@@ -268,12 +267,13 @@ function processOldStory(story, storyData) {
         isMobile = true;
     }
     else { // pc
-        ratingElem = story.querySelector('.story__left');
+        ratingElem = story.querySelector('.story__left .story__rating-block');
     }
     if (ratingElem === null) {
         return false;
     }
-    const ratingDown = ratingElem.querySelector('.story__rating-minus, .story__rating-down');
+    oldInterface = true;
+    let ratingDown = ratingElem.querySelector('.story__rating-minus, .story__rating-down');
     if (isMobile) {
         const buttonMinus = document.createElement('button');
         buttonMinus.classList.add('story__rating-minus');
@@ -285,6 +285,7 @@ function processOldStory(story, storyData) {
       </svg>
     </span>`;
         ratingDown.replaceWith(buttonMinus);
+        ratingDown = buttonMinus;
     }
     else {
         const minusesCounter = document.createElement('div');
@@ -296,6 +297,7 @@ function processOldStory(story, storyData) {
         const summary = document.createElement('div');
         summary.classList.add('story__rating-count');
         summary.textContent = storyData.story.rating.toString();
+        ratingDown.parentElement.insertBefore(summary, ratingDown);
     }
     processStoryComments(storyData.story.id, storyData, 1);
     return true;
@@ -309,13 +311,18 @@ async function processStory(story, processComments) {
         story.remove();
         return;
     }
+    if (oldInterface === true) {
+        processOldStory(story, storyData);
+        return;
+    }
     const ratingElem = story.querySelector('.story__rating');
     if (ratingElem === null) {
-        if (!processOldStory(story, storyData)) {
+        if (oldInterface === null && !processOldStory(story, storyData)) {
             console.warn('У поста нет элементов рейтинга.', story);
         }
         return;
     }
+    oldInterface = false;
     const ratingDown = ratingElem.querySelector('.story__rating-down');
     const minusesText = document.createElement('div');
     minusesText.classList.add('prm-minuses', 'story__rating-count');
@@ -336,18 +343,22 @@ async function processStories(stories) {
         processStory(story, false);
     }
 }
+function processCached(commentElem) {
+    const commentId = parseInt(commentElem.getAttribute('data-id'));
+    if (commentId in cachedComments) {
+        processComment(cachedComments[commentId]);
+        delete cachedComments[commentId];
+    }
+}
 function mutationsListener(mutationList, observer) {
     for (const mutation of mutationList) {
         for (const node of mutation.addedNodes) {
             if (!(node instanceof HTMLElement))
                 continue;
             if (node.matches(".comment__header")) {
-                const commentElem = node.parentNode.parentNode;
-                const commentId = parseInt(commentElem.getAttribute('data-id'));
-                if (commentId in cachedComments) {
-                    processComment(cachedComments[commentId]);
-                    delete cachedComments[commentId];
-                }
+                console.log(node);
+                const commentElem = node.closest('.comment');
+                processCached(commentElem);
             }
             else if (node.matches('article.story')) {
                 const storyElem = node;
@@ -355,7 +366,6 @@ function mutationsListener(mutationList, observer) {
                 processStory(storyElem, false);
             }
             else {
-                console.warn(node);
             }
         }
     }
@@ -386,11 +396,27 @@ async function main() {
   .comment__rating-down {
     padding: 2px 8px;
   }
-  `);
+  
+  /* old mobile interface */
+  .story__footer-rating .story__rating-minus {
+    background-color:var(--color-black-300);
+    border-radius:8px;
+    overflow:hidden;
+    padding:0;
+    display:flex;
+    align-items:center
+  }
+   
+  .story__footer-rating .story__rating-down {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding-left:2px
+  }`);
     // process static posts
     processStories(document.querySelectorAll("article.story"));
     observer = new MutationObserver(mutationsListener);
-    observer.observe(document.querySelector('.app__inner, .main__inner'), {
+    observer.observe(document.querySelector('.app__content, .main__inner'), {
         childList: true,
         subtree: true,
     });
