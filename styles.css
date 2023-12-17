@@ -1,17 +1,17 @@
-.prm-summary-rating {
-  margin: 0 7px 0 !important;
+.story__rating-up {
+  margin-right: 5px !important;
 }
 .prm-minuses {
-  margin: 0 0 0 7px !important;
+  padding-left: 7px !important;
+  margin: 0px !important;
 }
 .story__rating-down {
   margin-left: 0 !important;
 }
-
 .story__rating-count {
   margin: 7px 0 7px;
 }
-.custom-comments-counter {
+.rpm-summary-comment {
   margin-right: 8px;
 }
 .comment__rating-down .comment__rating-count {
@@ -19,31 +19,4 @@
 }
 .comment__rating-down {
   padding: 2px 8px;
-}
-
-.pikabu-rating-bar-vertical {
-  position: absolute;
-  right: -8px;
-  width: 4px;
-  height: 100%;
-  background: var(--color-danger-800);
-  border-radius: 15px;
-}
-.pikabu-rating-bar-vertical-pluses {
-  position: absolute;
-  width: 100%;
-  background-color: var(--color-primary-700);
-  border-radius: 15px;
-}
-.comment__body {
-  position: relative;
-}
-.pikabu-rating-bar-vertical-comment {
-  position: absolute;
-  background-color: var(--color-danger-800);
-  width: 3px;
-  bottom: 20px;
-  left: -8px;
-  top: 20px;
-  max-height: 100px;
 }
