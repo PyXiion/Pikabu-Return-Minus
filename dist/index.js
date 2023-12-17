@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.1
+// @version      0.5.2
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -180,6 +180,19 @@ var Pikabu;
     })(DataService = Pikabu.DataService || (Pikabu.DataService = {}));
 })(Pikabu || (Pikabu = {}));
 //#endregion
+let enableFilters = null;
+const shouldProcessComments = window.location.href.includes("/story/");
+const config = {
+    minStoryRating: 100,
+    summary: true,
+    filteringPageRegex: '^https?:\\/\\/pikabu.ru\\/(|best|companies)$',
+    update() {
+        config.minStoryRating = GM_config.get("minStoryRating").valueOf();
+        config.summary = GM_config.get("summary").valueOf();
+        config.filteringPageRegex = GM_config.get('filteringPageRegex').valueOf();
+        enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
+    }
+};
 let isConfigInit = false;
 GM_config.init({
     id: 'prm',
@@ -191,21 +204,32 @@ GM_config.init({
     })(),
     fields: {
         minStoryRating: {
+            section: ["Основные настройки"],
             type: 'int',
-            default: 100,
-            label: 'Посты с рейтингом ниже указанного будут удаляться из ленты.'
+            default: config.minStoryRating,
+            label: 'Посты с рейтингом ниже указанного будут удаляться из ленты.',
         },
         summary: {
             type: 'checkbox',
-            default: true,
-            label: 'Отображение суммарного рейтинга у постов и комментариев'
-        }
+            default: config.summary,
+            label: 'Отображение суммарного рейтинга у постов и комментариев',
+        },
+        filteringPageRegex: {
+            section: ["Продвинутые настройки"],
+            type: 'text',
+            label: 'Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
+            default: config.filteringPageRegex,
+        },
     },
     events: {
         init() {
             isConfigInit = true;
+            config.update();
         },
-    }
+        save() {
+            config.update();
+        },
+    },
 });
 const waitConfig = new Promise(resolve => {
     let isInit = () => setTimeout(() => isConfigInit ? resolve() : isInit(), 1);
@@ -214,8 +238,6 @@ const waitConfig = new Promise(resolve => {
 GM.registerMenuCommand('Открыть настройки', () => {
     GM_config.open();
 });
-const enableFilters = /^https?:\/\/pikabu.ru\/(|best|communities|companies)$/.test(window.location.href);
-const shouldProcessComments = window.location.href.includes("/story/");
 function addCss(css) {
     const styleSheet = document.createElement("style");
     styleSheet.innerText = css;
@@ -244,7 +266,7 @@ function processComment(comment) {
     minusesText.classList.add('comment__rating-count');
     ratingDown.prepend(minusesText);
     minusesText.textContent = comment.minuses.toString();
-    if (GM_config.get('summary')) {
+    if (config.summary) {
         const summary = document.createElement('div');
         summary.classList.add('comment__rating-count', 'rpm-summary-comment');
         summary.textContent = comment.rating.toString();
@@ -293,7 +315,7 @@ function processOldStory(story, storyData) {
         minusesCounter.textContent = storyData.story.minuses.toString();
         ratingDown.prepend(minusesCounter);
     }
-    if (GM_config.get('summary')) {
+    if (config.summary) {
         const summary = document.createElement('div');
         summary.classList.add('story__rating-count');
         summary.textContent = storyData.story.rating.toString();
@@ -307,7 +329,7 @@ async function processStory(story, processComments) {
     // get story data
     const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
     // delete the story if its ratings < the min rating
-    if (enableFilters && storyData.story.rating < GM_config.get('minStoryRating')) {
+    if (enableFilters && storyData.story.rating < config.minStoryRating) {
         story.remove();
         return;
     }
@@ -328,7 +350,7 @@ async function processStory(story, processComments) {
     minusesText.classList.add('prm-minuses', 'story__rating-count');
     ratingDown.prepend(minusesText);
     minusesText.textContent = storyData.story.minuses.toString();
-    if (GM_config.get('summary')) {
+    if (config.summary) {
         const summary = document.createElement('div');
         summary.classList.add('ptr-summary-rating', 'story__rating-count');
         summary.textContent = storyData.story.rating.toString();
