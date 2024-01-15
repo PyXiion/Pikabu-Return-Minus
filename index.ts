@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.3
+// @version      0.5.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -279,6 +279,9 @@ const config = {
   ratingBarComments: false,
   minRatesCountToShowRatingBar: 10,
 
+  minusesPattern: '%d',
+  minusesCommentPattern: '%d',
+
   update() {
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     config.summary = GM_config.get("summary").valueOf() as boolean;
@@ -287,8 +290,18 @@ const config = {
     config.ratingBarComments = GM_config.get('ratingBarComments').valueOf() as boolean;
     config.minRatesCountToShowRatingBar = GM_config.get('minRatesCountToShowRatingBar').valueOf() as number;
 
+    config.minusesPattern = GM_config.get('minusesPattern').valueOf() as string;
+    config.minusesCommentPattern = GM_config.get('minusesCommentPattern').valueOf() as string;
+
     enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
-  }
+  },
+
+  formatMinuses(minuses: number): string {
+    return config.minusesPattern.replace("%d", minuses.toString());
+  },
+  formatCommentMinuses(minuses: number): string {
+    return config.minusesCommentPattern.replace("%d", minuses.toString());
+  },
 };
 
 let isConfigInit = false;
@@ -334,6 +347,17 @@ GM_config.init({
       type: 'text',
       label: 'Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
       default: config.filteringPageRegex,
+    },
+
+    minusesPattern: {
+      type: "text",
+      default: config.minusesPattern,
+      label: 'Шаблон отображения минусов у постов. %d - количество минусов.'
+    },
+    minusesCommentPattern: {
+      type: "text",
+      default: config.minusesCommentPattern,
+      label: 'Шаблон отображения минусов у комментариев. %d - количество минусов.'
     },
   },
   events: {
@@ -396,7 +420,7 @@ function processComment(comment: Pikabu.Comment | CommentData) {
   minusesText.classList.add('comment__rating-count');
   ratingDown.prepend(minusesText);
 
-  minusesText.textContent = comment.minuses.toString();
+  minusesText.textContent = config.formatCommentMinuses(comment.minuses);
 
   if (config.summary) { 
     const summary = document.createElement('div');
@@ -481,7 +505,7 @@ function processOldStory(story: HTMLDivElement, storyData: Pikabu.CommentsData) 
   } else {
     const minusesCounter = document.createElement('div');
     minusesCounter.classList.add('story__rating-count');
-    minusesCounter.textContent = storyData.story.minuses.toString();
+    minusesCounter.textContent = config.formatMinuses(storyData.story.minuses);
 
     ratingDown.prepend(minusesCounter);
   }
@@ -540,7 +564,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   minusesText.classList.add('prm-minuses', 'story__rating-count');
   ratingDown.prepend(minusesText);
 
-  minusesText.textContent = storyData.story.minuses.toString();
+  minusesText.textContent = config.formatMinuses(storyData.story.minuses);
 
   if (config.summary) {
     const summary = document.createElement('div')

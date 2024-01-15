@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.3
+// @version      0.5.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -189,6 +189,8 @@ const config = {
     ratingBar: false,
     ratingBarComments: false,
     minRatesCountToShowRatingBar: 10,
+    minusesPattern: '%d',
+    minusesCommentPattern: '%d',
     update() {
         config.minStoryRating = GM_config.get("minStoryRating").valueOf();
         config.summary = GM_config.get("summary").valueOf();
@@ -196,8 +198,16 @@ const config = {
         config.ratingBar = GM_config.get('ratingBar').valueOf();
         config.ratingBarComments = GM_config.get('ratingBarComments').valueOf();
         config.minRatesCountToShowRatingBar = GM_config.get('minRatesCountToShowRatingBar').valueOf();
+        config.minusesPattern = GM_config.get('minusesPattern').valueOf();
+        config.minusesCommentPattern = GM_config.get('minusesCommentPattern').valueOf();
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
-    }
+    },
+    formatMinuses(minuses) {
+        return config.minusesPattern.replace("%d", minuses.toString());
+    },
+    formatCommentMinuses(minuses) {
+        return config.minusesCommentPattern.replace("%d", minuses.toString());
+    },
 };
 let isConfigInit = false;
 GM_config.init({
@@ -240,6 +250,16 @@ GM_config.init({
             type: 'text',
             label: 'Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
             default: config.filteringPageRegex,
+        },
+        minusesPattern: {
+            type: "text",
+            default: config.minusesPattern,
+            label: 'Шаблон отображения минусов у постов. %d - количество минусов.'
+        },
+        minusesCommentPattern: {
+            type: "text",
+            default: config.minusesCommentPattern,
+            label: 'Шаблон отображения минусов у комментариев. %d - количество минусов.'
         },
     },
     events: {
@@ -286,7 +306,7 @@ function processComment(comment) {
     const minusesText = document.createElement('div');
     minusesText.classList.add('comment__rating-count');
     ratingDown.prepend(minusesText);
-    minusesText.textContent = comment.minuses.toString();
+    minusesText.textContent = config.formatCommentMinuses(comment.minuses);
     if (config.summary) {
         const summary = document.createElement('div');
         summary.classList.add('comment__rating-count', 'rpm-summary-comment');
@@ -356,7 +376,7 @@ function processOldStory(story, storyData) {
     else {
         const minusesCounter = document.createElement('div');
         minusesCounter.classList.add('story__rating-count');
-        minusesCounter.textContent = storyData.story.minuses.toString();
+        minusesCounter.textContent = config.formatMinuses(storyData.story.minuses);
         ratingDown.prepend(minusesCounter);
     }
     if (config.summary) {
@@ -400,7 +420,7 @@ async function processStory(story, processComments) {
     const minusesText = document.createElement('div');
     minusesText.classList.add('prm-minuses', 'story__rating-count');
     ratingDown.prepend(minusesText);
-    minusesText.textContent = storyData.story.minuses.toString();
+    minusesText.textContent = config.formatMinuses(storyData.story.minuses);
     if (config.summary) {
         const summary = document.createElement('div');
         summary.classList.add('ptr-summary-rating', 'story__rating-count');
