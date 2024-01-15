@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.2
+// @version      0.5.3
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -275,10 +275,17 @@ const config = {
 
   filteringPageRegex: '^https?:\\/\\/pikabu.ru\\/(|best|companies)$',
 
+  ratingBar: false,
+  ratingBarComments: false,
+  minRatesCountToShowRatingBar: 10,
+
   update() {
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     config.summary = GM_config.get("summary").valueOf() as boolean;
     config.filteringPageRegex = GM_config.get('filteringPageRegex').valueOf() as string;
+    config.ratingBar = GM_config.get('ratingBar').valueOf() as boolean;
+    config.ratingBarComments = GM_config.get('ratingBarComments').valueOf() as boolean;
+    config.minRatesCountToShowRatingBar = GM_config.get('minRatesCountToShowRatingBar').valueOf() as number;
 
     enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
   }
@@ -306,6 +313,22 @@ GM_config.init({
       default: config.summary,
       label: 'Отображение суммарного рейтинга у постов и комментариев',
     }, 
+    ratingBar: {
+      type: "checkbox",
+      default: config.ratingBar,
+      label: 'Отображение соотношения плюс и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.'
+    },
+    ratingBarComments: {
+      type: "checkbox",
+      default: config.ratingBarComments,
+      label: 'Отображение соотношения плюс и минусов у комментариев'
+    },
+    minRatesCountToShowRatingBar: {
+      type: "int",
+      default: config.minRatesCountToShowRatingBar,
+      label: 'Минимальное количество оценок у поста/комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.'
+    },
+
     filteringPageRegex: {
       section: ["Продвинутые настройки"],
       type: 'text',
@@ -359,7 +382,7 @@ const cachedComments = new Map<number, CommentData>();
 let oldInterface = null;
 
 function processComment(comment: Pikabu.Comment | CommentData) {
-  const commentElem = document.getElementById(`comment_${comment.id}`);
+  const commentElem = document.getElementById(`comment_${comment.id}`) as HTMLDivElement;
 
   if (commentElem === null) {
     if (comment instanceof Pikabu.Comment)
@@ -382,6 +405,16 @@ function processComment(comment: Pikabu.Comment | CommentData) {
 
     ratingDown.parentElement.insertBefore(summary, ratingDown);
   }
+
+  const totalRates = comment.pluses + comment.minuses;
+  if (config.ratingBarComments && totalRates >= config.minRatesCountToShowRatingBar) {
+    let ratio: number = 0.5;
+
+    if (totalRates > 0)
+      ratio = comment.pluses / totalRates;
+
+    addRatingBar(commentElem, ratio);
+  }
 }
 
 async function processStoryComments(storyId: number, storyData: Pikabu.CommentsData, page: number) {
@@ -392,6 +425,27 @@ async function processStoryComments(storyId: number, storyData: Pikabu.CommentsD
   if (storyData.comments.length >= 100) {
     storyData = await Pikabu.DataService.fetchStory(storyId, page + 1);
     await processStoryComments(storyId, storyData, page + 1);
+  }
+}
+
+function addRatingBar(story: HTMLDivElement, ratio: number) {
+  const block = story.querySelector('.story__rating-block, .comment__body, .story__emotions');
+  console.log(story, block, ratio)
+
+  if (block !== null) {
+    const bar = document.createElement('div');
+    const inner = document.createElement('div');
+    
+    bar.append(inner);
+
+    bar.classList.add('rpm-rating-bar');
+    inner.classList.add('rpm-rating-bar-inner');
+
+    inner.style.height = (ratio * 100).toFixed(1) + "%";
+
+    block.prepend(bar);
+  } else {
+    // TODO mobile
   }
 }
 
@@ -438,6 +492,16 @@ function processOldStory(story: HTMLDivElement, storyData: Pikabu.CommentsData) 
     summary.textContent = storyData.story.rating.toString();
 
     ratingDown.parentElement.insertBefore(summary, ratingDown);
+  }
+
+  const totalRates = storyData.story.pluses + storyData.story.minuses;
+  if (config.ratingBar && totalRates >= config.minRatesCountToShowRatingBar) {
+    let ratio: number = 0.5;
+
+    if (totalRates > 0)
+      ratio = storyData.story.pluses / totalRates;
+
+    addRatingBar(story, ratio);
   }
 
   processStoryComments(storyData.story.id, storyData, 1);
@@ -531,8 +595,7 @@ var observer: MutationObserver = null;
 async function main() {
   await waitConfig;
 
-  addCss(`
-  .story__rating-up {
+  addCss(`.story__rating-up {
     margin-right: 5px !important;
   }
   .prm-minuses {
@@ -553,6 +616,30 @@ async function main() {
   }
   .comment__rating-down {
     padding: 2px 8px;
+  }
+  
+  .rpm-rating-bar {
+    width: 5px;
+    background: var(--color-danger-800);
+    height: 90%;
+    position: absolute;
+    right: -9.5px;
+    top: 5%;
+    border-radius: 5px;
+  }
+  .rpm-rating-bar-inner {
+    background: var(--color-primary-700);
+    /* width: 99%; */
+    border-radius: 5px;
+  }
+  
+  .comment__body {
+    position: relative;
+  }
+  .comment .rpm-rating-bar {
+    height: 70px;
+    top: 15px;
+    left: -10px;
   }
   
   /* old mobile interface */
