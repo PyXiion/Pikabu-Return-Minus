@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.5
+// @version      0.5.6
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -189,8 +189,8 @@ const config = {
     ratingBar: false,
     ratingBarComments: false,
     minRatesCountToShowRatingBar: 10,
-    minusesPattern: '%d',
-    minusesCommentPattern: '%d',
+    minusesPattern: null,
+    minusesCommentPattern: null,
     update() {
         config.minStoryRating = GM_config.get("minStoryRating").valueOf();
         config.summary = GM_config.get("summary").valueOf();
@@ -198,18 +198,21 @@ const config = {
         config.ratingBar = GM_config.get('ratingBar').valueOf();
         config.ratingBarComments = GM_config.get('ratingBarComments').valueOf();
         config.minRatesCountToShowRatingBar = GM_config.get('minRatesCountToShowRatingBar').valueOf();
-        config.minusesPattern = GM_config.get('minusesPattern').valueOf();
-        config.minusesCommentPattern = GM_config.get('minusesCommentPattern').valueOf();
-        config.minusesPattern = config.minusesPattern.replace("%d", "story.minuses");
-        config.minusesCommentPattern = config.minusesCommentPattern.replace("%d", "comment.minuses");
+        function makeEval(args, str) {
+            return new Function(args, 'return ' + str);
+        }
+        config.minusesPattern = makeEval('story', GM_config.get('minusesPattern').valueOf().replace('%d', 'story.minuses'));
+        config.minusesCommentPattern = makeEval('comment', GM_config.get('minusesCommentPattern').valueOf().replace('%d', 'comment.minuses'));
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
-        return eval(config.minusesPattern).toString();
+        // return eval(config.minusesPattern).toString();\
+        return config.minusesPattern(story).toString();
     },
     formatCommentMinuses(comment) {
-        return eval(config.minusesCommentPattern).toString();
-    },
+        // return eval(config.minusesCommentPattern).toString();
+        return config.minusesCommentPattern(comment).toString();
+    }
 };
 let isConfigInit = false;
 GM_config.init({
@@ -255,13 +258,13 @@ GM_config.init({
         },
         minusesPattern: {
             type: "text",
-            default: config.minusesPattern,
+            default: 'story.minuses',
             label: 'Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
         },
         minusesCommentPattern: {
             type: "text",
-            default: config.minusesCommentPattern,
-            label: 'Шабло-5н отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
+            default: 'comment.minuses',
+            label: 'Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
         },
     },
     events: {
