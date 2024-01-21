@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.4
+// @version      0.5.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -200,13 +200,15 @@ const config = {
         config.minRatesCountToShowRatingBar = GM_config.get('minRatesCountToShowRatingBar').valueOf();
         config.minusesPattern = GM_config.get('minusesPattern').valueOf();
         config.minusesCommentPattern = GM_config.get('minusesCommentPattern').valueOf();
+        config.minusesPattern = config.minusesPattern.replace("%d", "story.minuses");
+        config.minusesCommentPattern = config.minusesCommentPattern.replace("%d", "comment.minuses");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
-    formatMinuses(minuses) {
-        return config.minusesPattern.replace("%d", minuses.toString());
+    formatMinuses(story) {
+        return eval(config.minusesPattern).toString();
     },
-    formatCommentMinuses(minuses) {
-        return config.minusesCommentPattern.replace("%d", minuses.toString());
+    formatCommentMinuses(comment) {
+        return eval(config.minusesCommentPattern).toString();
     },
 };
 let isConfigInit = false;
@@ -248,18 +250,18 @@ GM_config.init({
         filteringPageRegex: {
             section: ["Продвинутые настройки"],
             type: 'text',
-            label: 'Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
+            label: 'storyСтраницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
             default: config.filteringPageRegex,
         },
         minusesPattern: {
             type: "text",
             default: config.minusesPattern,
-            label: 'Шаблон отображения минусов у постов. %d - количество минусов.'
+            label: 'Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
         },
         minusesCommentPattern: {
             type: "text",
             default: config.minusesCommentPattern,
-            label: 'Шаблон отображения минусов у комментариев. %d - количество минусов.'
+            label: 'Шабло-5н отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
         },
     },
     events: {
@@ -306,10 +308,10 @@ function processComment(comment) {
     const minusesText = document.createElement('div');
     minusesText.classList.add('comment__rating-count');
     ratingDown.prepend(minusesText);
-    minusesText.textContent = config.formatCommentMinuses(comment.minuses);
+    minusesText.textContent = config.formatCommentMinuses(comment);
     if (config.summary) {
         const summary = document.createElement('div');
-        summary.classList.add('comment__rating-count', 'rpm-summary-comment');
+        summary.classList.add('comment__rating-count', 'rpm-summary');
         summary.textContent = comment.rating.toString();
         ratingDown.parentElement.insertBefore(summary, ratingDown);
     }
@@ -364,7 +366,7 @@ function processOldStory(story, storyData) {
         const buttonMinus = document.createElement('button');
         buttonMinus.classList.add('story__rating-minus');
         buttonMinus.innerHTML = `
-    <span class="story__rating-count">${storyData.story.minuses}</span>
+    <span class="story__rating-rpm-count">${storyData.story.minuses}</span>
     <span type="button" class="tool story__rating-down" data-role="rating-down">
       <svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__rating-down icon--ui__rating-down_story">
         <use xlink:href="#icon--ui__rating-down"></use>
@@ -376,12 +378,15 @@ function processOldStory(story, storyData) {
     else {
         const minusesCounter = document.createElement('div');
         minusesCounter.classList.add('story__rating-count');
-        minusesCounter.textContent = config.formatMinuses(storyData.story.minuses);
+        minusesCounter.textContent = config.formatMinuses(storyData.story);
         ratingDown.prepend(minusesCounter);
     }
     if (config.summary) {
         const summary = document.createElement('div');
-        summary.classList.add('story__rating-count');
+        if (isMobile)
+            summary.classList.add('story__rating-rpm-count', 'rpm-summary');
+        else
+            summary.classList.add('story__rating-count');
         summary.textContent = storyData.story.rating.toString();
         ratingDown.parentElement.insertBefore(summary, ratingDown);
     }
@@ -418,12 +423,12 @@ async function processStory(story, processComments) {
     oldInterface = false;
     const ratingDown = ratingElem.querySelector('.story__rating-down');
     const minusesText = document.createElement('div');
-    minusesText.classList.add('prm-minuses', 'story__rating-count');
+    minusesText.classList.add('story__rating-rpm-count');
     ratingDown.prepend(minusesText);
-    minusesText.textContent = config.formatMinuses(storyData.story.minuses);
+    minusesText.textContent = config.formatMinuses(storyData.story);
     if (config.summary) {
         const summary = document.createElement('div');
-        summary.classList.add('ptr-summary-rating', 'story__rating-count');
+        summary.classList.add('story__rating-rpm-count', 'rpm-summary');
         summary.textContent = storyData.story.rating.toString();
         ratingElem.insertBefore(summary, ratingDown);
     }
@@ -487,6 +492,23 @@ async function main() {
   }
   .comment__rating-down {
     padding: 2px 8px;
+  }
+  
+  .story__footer .story__rating-rpm-count {
+    font-size: 13px;
+    color: var(--color-black-700);
+    margin: auto 7px auto 7px;
+    line-height: 0;
+    display: block;
+  }
+  .story__footer .rpm-summary, .comment .rpm-summary {
+    margin: auto 9px auto 0px;
+    font-weight: 500;
+  }
+  .comment__rating-rpm-count {
+    padding: 2px 8px;
+    flex-shrink: 0;
+    margin-left: auto;
   }
   
   .rpm-rating-bar {

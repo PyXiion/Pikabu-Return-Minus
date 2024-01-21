@@ -21,6 +21,23 @@
   padding: 2px 8px;
 }
 
+.story__footer .story__rating-rpm-count {
+  font-size: 13px;
+  color: var(--color-black-700);
+  margin: auto 7px auto 7px;
+  line-height: 0;
+  display: block;
+}
+.story__footer .rpm-summary, .comment .rpm-summary {
+  margin: auto 9px auto 0px;
+  font-weight: 500;
+}
+.comment__rating-rpm-count {
+  padding: 2px 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .rpm-rating-bar {
   width: 5px;
   background: var(--color-danger-800);
