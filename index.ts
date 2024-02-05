@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.6
+// @version      0.5.7
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -282,6 +282,8 @@ const config = {
   minusesPattern: null,
   minusesCommentPattern: null,
 
+  ownCommentPattern: null,
+
   update() {
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     config.summary = GM_config.get("summary").valueOf() as boolean;
@@ -296,17 +298,19 @@ const config = {
 
     config.minusesPattern = makeEval('story', (GM_config.get('minusesPattern').valueOf() as string).replace('%d', 'story.minuses'));
     config.minusesCommentPattern = makeEval('comment', (GM_config.get('minusesCommentPattern').valueOf() as string).replace('%d', 'comment.minuses'));
+    config.ownCommentPattern = makeEval('comment', (GM_config.get('ownCommentPattern').valueOf() as string));
 
     enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
   },
 
   formatMinuses(story): string {
-    // return eval(config.minusesPattern).toString();\
     return config.minusesPattern(story).toString();
   },
   formatCommentMinuses(comment): string {
-    // return eval(config.minusesCommentPattern).toString();
     return config.minusesCommentPattern(comment).toString();
+  },
+  formatOwnRating(comment): string {
+    return config.ownCommentPattern(comment).toString();
   }
 };
 
@@ -330,28 +334,28 @@ GM_config.init({
     summary: {
       type: 'checkbox',
       default: config.summary,
-      label: 'Отображение суммарного рейтинга у постов и комментариев',
+      label: 'Отображение суммарного рейтинга у постов и комментариев.',
     }, 
     ratingBar: {
       type: "checkbox",
       default: config.ratingBar,
-      label: 'Отображение соотношения плюс и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.'
+      label: 'Отображение соотношения плюсов и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.'
     },
     ratingBarComments: {
       type: "checkbox",
       default: config.ratingBarComments,
-      label: 'Отображение соотношения плюс и минусов у комментариев'
+      label: 'Отображение соотношения плюсов и минусов у комментариев.'
     },
     minRatesCountToShowRatingBar: {
       type: "int",
       default: config.minRatesCountToShowRatingBar,
-      label: 'Минимальное количество оценок у поста/комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.'
+      label: 'Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.'
     },
 
     filteringPageRegex: {
       section: ["Продвинутые настройки"],
       type: 'text',
-      label: 'storyСтраницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
+      label: 'Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).',
       default: config.filteringPageRegex,
     },
 
@@ -364,6 +368,11 @@ GM_config.init({
       type: "text",
       default: 'comment.minuses',
       label: 'Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
+    },
+    ownCommentPattern: {
+      type: "text",
+      default: '(comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`',
+      label: 'Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.'
     },
   },
   events: {
@@ -417,6 +426,14 @@ function processComment(comment: Pikabu.Comment | CommentData) {
   if (commentElem === null) {
     if (comment instanceof Pikabu.Comment)
       cachedComments[comment.id] = new CommentData(comment);
+    return;
+  }
+
+  const userElem = commentElem.querySelector('.comment__user');
+
+  if (userElem.hasAttribute('data-own') && userElem.getAttribute('data-own') === "true") {
+    const textRatingElem = commentElem.querySelector('.comment__rating-count') as HTMLDivElement;
+    textRatingElem.innerText = config.formatOwnRating(comment);
     return;
   }
 
