@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.7
+// @version      0.5.8
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -192,6 +192,7 @@ const config = {
     minusesPattern: null,
     minusesCommentPattern: null,
     ownCommentPattern: null,
+    videoDownloadButtons: false,
     update() {
         config.minStoryRating = GM_config.get("minStoryRating").valueOf();
         config.summary = GM_config.get("summary").valueOf();
@@ -205,6 +206,7 @@ const config = {
         config.minusesPattern = makeEval('story', GM_config.get('minusesPattern').valueOf().replace('%d', 'story.minuses'));
         config.minusesCommentPattern = makeEval('comment', GM_config.get('minusesCommentPattern').valueOf().replace('%d', 'comment.minuses'));
         config.ownCommentPattern = makeEval('comment', GM_config.get('ownCommentPattern').valueOf());
+        config.videoDownloadButtons = GM_config.get('videoDownloadButtons').valueOf();
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -252,6 +254,12 @@ GM_config.init({
             type: "int",
             default: config.minRatesCountToShowRatingBar,
             label: 'Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.'
+        },
+        videoDownloadButtons: {
+            section: ["Дополнительно"],
+            type: "checkbox",
+            label: "Добавляет к встроенным видео в правом нижнем углу прямые ссылки на видео (обычно это mp4 и webm).",
+            default: config.videoDownloadButtons
         },
         filteringPageRegex: {
             section: ["Продвинутые настройки"],
@@ -465,6 +473,30 @@ function processCached(commentElem) {
         delete cachedComments[commentId];
     }
 }
+function addVideoDownloadButtons(playerElement) {
+    console.log("HELLO VIDEO", playerElement);
+    const videoElement = playerElement.querySelector("video.player__video");
+    const videoControls = playerElement.querySelector(".player__controls");
+    if (videoElement === null || videoControls === null)
+        return;
+    function addButton(link) {
+        const a = document.createElement('a');
+        a.classList.add('rpm-download-video-button');
+        const name = link.split('/').pop(); // "https://example/com/some_cool_video.mp4" -> "some_cool_video.mp4"
+        const extension = name.split('.').slice(1).join('.'); // "some_cool_video.mp4" -> "mp4" (and "video.av1.mp4" -> "av1.mp4")
+        a.href = link;
+        a.download = name;
+        a.textContent = extension;
+        // add link to controls
+        videoControls.append(a);
+    }
+    const sources = Array.from(videoElement.children);
+    if (sources.length == 0)
+        sources.push(videoElement);
+    for (const source of sources) {
+        addButton(source.src);
+    }
+}
 function mutationsListener(mutationList, observer) {
     for (const mutation of mutationList) {
         for (const node of mutation.addedNodes) {
@@ -480,7 +512,13 @@ function mutationsListener(mutationList, observer) {
                 console.log(storyElem);
                 processStory(storyElem, false);
             }
-            else {
+            else if (config.videoDownloadButtons && node.matches(".player__player")) {
+                try {
+                    addVideoDownloadButtons(node);
+                }
+                catch (error) {
+                    console.error("[RPM] Error addVideoDownloadButtons(): ", error);
+                }
             }
         }
     }
@@ -510,7 +548,6 @@ async function main() {
   .comment__rating-down {
     padding: 2px 8px;
   }
-  
   .story__footer .story__rating-rpm-count {
     font-size: 13px;
     color: var(--color-black-700);
@@ -518,7 +555,8 @@ async function main() {
     line-height: 0;
     display: block;
   }
-  .story__footer .rpm-summary, .comment .rpm-summary {
+  .story__footer .rpm-summary,
+  .comment .rpm-summary {
     margin: auto 9px auto 0px;
     font-weight: 500;
   }
@@ -527,7 +565,6 @@ async function main() {
     flex-shrink: 0;
     margin-left: auto;
   }
-  
   .rpm-rating-bar {
     width: 5px;
     background: var(--color-danger-800);
@@ -538,11 +575,9 @@ async function main() {
     border-radius: 5px;
   }
   .rpm-rating-bar-inner {
-    background: var(--color-primary-700);
-    /* width: 99%; */
+    background: var(--color-primary-700);    /* width: 99%; */
     border-radius: 5px;
   }
-  
   .comment__body {
     position: relative;
   }
@@ -550,23 +585,26 @@ async function main() {
     height: 70px;
     top: 15px;
     left: -10px;
-  }
-  
-  /* old mobile interface */
+  }  /* old mobile interface */
   .story__footer-rating .story__rating-minus {
     background-color:var(--color-black-300);
     border-radius:8px;
     overflow:hidden;
     padding:0;
     display:flex;
-    align-items:center
+    align-items:center  ;
   }
-   
   .story__footer-rating .story__rating-down {
     display:flex;
     align-items:center;
     justify-content:center;
-    padding-left:2px
+    padding-left:2px  ;
+  }
+  
+  .rpm-download-video-button {
+    color: var(--color-bright-900);
+    font-size: 125%;
+    margin-left: 3px;
   }`);
     // process static posts
     processStories(document.querySelectorAll("article.story"));
