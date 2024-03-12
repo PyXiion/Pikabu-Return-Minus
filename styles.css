@@ -72,9 +72,21 @@
   justify-content:center;
   padding-left:2px  ;
 }
-
 .rpm-download-video-button {
   color: var(--color-bright-900);
   font-size: 125%;
   margin-left: 3px;
+}
+
+.rpm-block-author {
+  overflow:hidden;
+  margin-right:24px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  padding:0;
+  background:0 0 
+}
+.rpm-block-author:hover * {
+  fill: var(--color-danger-800);
 }
