@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.9
+// @version      0.5.10
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -276,6 +276,8 @@ const config = {
 
   videoDownloadButtons: false,
 
+  showBlockAuthorForeverButton: true,
+
   update() {
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     config.summary = GM_config.get("summary").valueOf() as boolean;
@@ -316,6 +318,8 @@ const config = {
     config.videoDownloadButtons = GM_config.get(
       "videoDownloadButtons"
     ).valueOf() as boolean;
+
+    config.showBlockAuthorForeverButton = GM_config.get("showBlockAuthorForeverButton").valueOf() as boolean;
 
     enableFilters = new RegExp(config.filteringPageRegex).test(
       window.location.href
@@ -371,6 +375,12 @@ GM_config.init({
       default: config.minRatesCountToShowRatingBar,
       label:
         "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.",
+    },
+    showBlockAuthorForeverButton: {
+      type: "checkbox",
+      default: config.showBlockAuthorForeverButton,
+      label:
+        "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. Требуется авторизация.",
     },
 
     videoDownloadButtons: {
@@ -591,8 +601,6 @@ function processOldStory(
   story: HTMLDivElement,
   storyData: Pikabu.CommentsData
 ) {
-  addBlockButton(story);
-
   let ratingElem = story.querySelector(".story__footer-rating > div");
   let isMobile = false;
 
@@ -657,6 +665,11 @@ function processOldStory(
 }
 
 async function processStory(story: HTMLDivElement, processComments: boolean) {
+  // Block author button
+  if (config.showBlockAuthorForeverButton) {
+    addBlockButton(story);
+  }
+
   const storyId = parseInt(story.getAttribute("data-story-id"));
 
   // get story data
@@ -879,6 +892,12 @@ async function main() {
 }
 .rpm-block-author:hover * {
   fill: var(--color-danger-800);
+}
+.story__footer-tools-inner .rpm-block-author {
+  overflow: visible;
+  margin-right: auto;
+  margin-left:8px;
+  transform: scale(1.3);
 }`);
 
   // process static posts

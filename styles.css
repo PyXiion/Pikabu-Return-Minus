@@ -90,3 +90,9 @@
 .rpm-block-author:hover * {
   fill: var(--color-danger-800);
 }
+.story__footer-tools-inner .rpm-block-author {
+  overflow: visible;
+  margin-right: auto;
+  margin-left:8px;
+  transform: scale(1.3);
+}

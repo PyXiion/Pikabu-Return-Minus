@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.9
+// @version      0.5.10
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -195,6 +195,7 @@ const config = {
     minusesCommentPattern: null,
     ownCommentPattern: null,
     videoDownloadButtons: false,
+    showBlockAuthorForeverButton: true,
     update() {
         config.minStoryRating = GM_config.get("minStoryRating").valueOf();
         config.summary = GM_config.get("summary").valueOf();
@@ -209,6 +210,7 @@ const config = {
         config.minusesCommentPattern = makeEval("comment", GM_config.get("minusesCommentPattern").valueOf().replace("%d", "comment.minuses"));
         config.ownCommentPattern = makeEval("comment", GM_config.get("ownCommentPattern").valueOf());
         config.videoDownloadButtons = GM_config.get("videoDownloadButtons").valueOf();
+        config.showBlockAuthorForeverButton = GM_config.get("showBlockAuthorForeverButton").valueOf();
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -256,6 +258,11 @@ GM_config.init({
             type: "int",
             default: config.minRatesCountToShowRatingBar,
             label: "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.",
+        },
+        showBlockAuthorForeverButton: {
+            type: "checkbox",
+            default: config.showBlockAuthorForeverButton,
+            label: "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. Требуется авторизация.",
         },
         videoDownloadButtons: {
             section: ["Дополнительно"],
@@ -411,7 +418,6 @@ function addRatingBar(story, ratio) {
     }
 }
 function processOldStory(story, storyData) {
-    addBlockButton(story);
     let ratingElem = story.querySelector(".story__footer-rating > div");
     let isMobile = false;
     if (ratingElem !== null) {
@@ -466,6 +472,10 @@ function processOldStory(story, storyData) {
     return true;
 }
 async function processStory(story, processComments) {
+    // Block author button
+    if (config.showBlockAuthorForeverButton) {
+        addBlockButton(story);
+    }
     const storyId = parseInt(story.getAttribute("data-story-id"));
     // get story data
     const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
@@ -656,6 +666,12 @@ async function main() {
 }
 .rpm-block-author:hover * {
   fill: var(--color-danger-800);
+}
+.story__footer-tools-inner .rpm-block-author {
+  overflow: visible;
+  margin-right: auto;
+  margin-left:8px;
+  transform: scale(1.3);
 }`);
     // process static posts
     processStories(document.querySelectorAll("article.story"));
