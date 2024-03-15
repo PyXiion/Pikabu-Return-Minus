@@ -2,6 +2,32 @@ declare function MD5(value: string): string;
 
 declare namespace PikabuJson
 {
+  interface StoryDataElement {
+    id: string;
+
+    /** 
+     * t  - text
+     * vf - video
+    */
+    type: string;
+    data: StoryDataElementData;
+  }
+
+
+
+  interface StoryDataElementData {}
+
+  interface StoryDataElementDataVideoSource {
+    size: number;
+    url: string;
+  }
+  
+  interface StoryDataElementDataVideo {
+    av1: StoryDataElementDataVideoSource;
+    mp4: StoryDataElementDataVideoSource;
+    webm: StoryDataElementDataVideoSource;
+  }
+
   interface Story
   {
     /**
@@ -23,6 +49,8 @@ declare namespace PikabuJson
      * Story rating
      */
     story_digs: number;
+
+    story_data: StoryDataElement;
   }
 
   interface Comment
