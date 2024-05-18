@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.5.11
+// @version      0.6
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -184,16 +184,33 @@ namespace Pikabu {
   }
 
   export class Post extends RatingObject {
-    public videos = [];
+    public videos: string[][] = [];
 
     public constructor(payload: PikabuJson.Story) {
       super();
       this.id = payload.story_id;
-      this.rating = payload.story_digs ?? 0;
       this.pluses = payload.story_pluses ?? 0;
       this.minuses = payload.story_minuses ?? 0;
+      this.rating = payload.story_digs ?? (this.pluses - this.minuses);
 
-      // if (payload.)
+      this.parseData(payload.story_data)
+    }
+
+    private parseData(dataArr: any) {
+      for (let data of dataArr) {
+        if ((data.type as string).includes('v')) { // v means video (maybe)
+          data = data.data;
+          let urls = [];
+          let extensions = ['mp4', 'webm', 'av1'];
+          for (let ext of extensions) {
+            if (ext in data && data[ext].url) {
+              urls.push(data[ext].url);
+            }
+          }
+
+          this.videos.push(urls);
+        }
+      }
     }
   }
 
@@ -259,9 +276,9 @@ namespace Pikabu {
 let enableFilters = null;
 const shouldProcessComments = window.location.href.includes("/story/");
 
-
-
 const config = {
+  debug: false,
+
   minStoryRating: 100,
   summary: true,
 
@@ -276,11 +293,12 @@ const config = {
 
   ownCommentPattern: null,
 
-  videoDownloadButtons: false,
+  videoDownloadButtons: true,
 
   showBlockAuthorForeverButton: true,
 
   update() {
+    config.debug = GM_config.get("debug").valueOf() as boolean;
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     config.summary = GM_config.get("summary").valueOf() as boolean;
     config.filteringPageRegex = GM_config.get(
@@ -428,6 +446,13 @@ GM_config.init({
       label:
         "Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.",
     },
+
+    debug: {
+      type: "checkbox",
+      label:
+        "Включить дополнительные логи в консоли.",
+      default: config.debug
+    },
   },
   events: {
     init() {
@@ -439,6 +464,26 @@ GM_config.init({
   },
 });
 
+const logPrefix = "[RPM]";
+
+function info(...args: any): void {
+  if (config.debug) {
+    console.info(logPrefix, ...args);
+  }
+}
+
+function warn(...args: any): void {
+  if (config.debug) {
+    console.warn(logPrefix, ...args);
+  }
+}
+
+function error(...args: any): void {
+  if (config.debug) {
+    console.error(logPrefix, ...args);
+  }
+}
+
 const waitConfig = new Promise<void>((resolve) => {
   let isInit = () => setTimeout(() => (isConfigInit ? resolve() : isInit()), 1);
   isInit();
@@ -447,6 +492,7 @@ const waitConfig = new Promise<void>((resolve) => {
 const supportMenuCommands: boolean = GM.registerMenuCommand !== undefined;
 
 GM.registerMenuCommand("Открыть настройки", () => {
+  info("Открыты настройки.");
   GM_config.open();
 });
 
@@ -455,6 +501,7 @@ function addCss(css: string) {
   styleSheet.innerText = css;
   // is added to the end of the body because it must override some of the original styles
   document.body.appendChild(styleSheet);
+  info("Добавлен CSS");
 }
 
 class CommentData {
@@ -471,9 +518,19 @@ class CommentData {
   }
 }
 
+// Variables
 const cachedComments = new Map<number, CommentData>();
 let oldInterface = null;
 
+const cachedPostVideos = new Map<number, string[][]>();
+
+const blockIconTemplate = (function () {
+  const div = document.createElement("div");
+  div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__save"><use xlink:href="#icon--ui__ban"></use></svg>`;
+  return div.firstChild;
+})();
+
+// Functions
 async function blockAuthorForever(button: HTMLButtonElement, authorId: number) {
   button.disabled = true;
 
@@ -486,22 +543,18 @@ async function blockAuthorForever(button: HTMLButtonElement, authorId: number) {
       }
     );
     button.remove();
+    info("Автор с ID", authorId, "заблокирован");
   } catch {
     button.disabled = false;
+    error("Не получилось заблокировать автора с ID", authorId, ", возможно отсутствует Интернет-соединение");
   }
 }
-
-const blockIconTemplate = (function () {
-  const div = document.createElement("div");
-  div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__save"><use xlink:href="#icon--ui__ban"></use></svg>`;
-  return div.firstChild;
-})();
 
 function addBlockButton(story: HTMLDivElement) {
   const saveButton = story.querySelector(".story__save");
 
   if (saveButton === null) {
-    console.warn("[RPM] Failed to add a block button to", story);
+    warn("Failed to add a block button to", story);
     return;
   }
 
@@ -689,11 +742,18 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   // delete the story if its ratings < the min rating
   if (
     enableFilters &&
-    storyData.story.rating < (config.minStoryRating as number)
+    storyData.story.rating < config.minStoryRating
   ) {
     story.remove();
+    info("Удалил пост", story, "по фильтру рейтинга:", `storyData.story.rating < config.minStoryRating = ${storyData.story.rating} < ${config.minStoryRating} = true`)
     return;
   }
+
+  // videos
+  if (config.videoDownloadButtons)
+    processPostVideos(story, storyData);
+
+  // determine post style
 
   if (oldInterface === true) {
     processOldStory(story, storyData);
@@ -702,7 +762,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   const ratingElem = story.querySelector(".story__rating");
   if (ratingElem === null) {
     if (oldInterface === null && !processOldStory(story, storyData)) {
-      console.warn("У поста нет элементов рейтинга.", story);
+      warn("У поста нет элементов рейтинга.", story);
     }
     return;
   }
@@ -744,16 +804,43 @@ function processCached(commentElem: HTMLDivElement) {
   }
 }
 
-function addVideoDownloadButtons(playerElement: HTMLDivElement) {
-  const videoElement: HTMLVideoElement = playerElement.querySelector(
-    "video.player__video"
-  );
-  const videoControls: HTMLDivElement =
-    playerElement.querySelector(".player__controls");
+function processPostVideos(story: HTMLDivElement, storyData: Pikabu.CommentsData) {
+  function getPostPlayers(): HTMLElement[] {
+    return Array.from(story.querySelectorAll('.story-block_type_video'));
+  }
 
-  if (videoElement === null || videoControls === null) return;
+  function addUrlToPlayer(player: HTMLElement, urls: string[]) {
+    const urlListElem = document.createElement('p');
+    urlListElem.classList.add('rpm-video-list');
 
-  function addButton(link: string) {
+    for (const url of urls) {
+      const urlElem = document.createElement('a');
+      urlElem.target = '_blank';
+
+      const extension = '.' + url.split('.').pop();
+
+      urlElem.textContent = extension;
+      urlElem.href = url;
+
+      urlListElem.appendChild(urlElem);
+    }
+
+    player.parentElement.insertBefore(urlListElem, player.nextSibling);
+  }
+
+  const playerElements = getPostPlayers();
+  for (const i in storyData.story.videos) {
+    const player = playerElements[i];
+    const videoUrls = storyData.story.videos[i];
+
+    addUrlToPlayer(player, videoUrls);
+  }
+}
+
+function addVideoDownloadButtons(postId: number, url: string) {
+  const videoControls: HTMLDivElement[] = Array.from(document.querySelectorAll(`.story[data-story-id="${postId}"] .player__controls`));
+
+  function addButton(link: string, videoControls: HTMLDivElement) {
     const a = document.createElement("a");
     a.classList.add("rpm-download-video-button");
 
@@ -768,14 +855,11 @@ function addVideoDownloadButtons(playerElement: HTMLDivElement) {
     videoControls.append(a);
   }
 
-  const sources: Array<HTMLSourceElement> = Array.from(
-    videoElement.children
-  ) as Array<HTMLSourceElement>;
-  if (sources.length == 0)
-    sources.push(videoElement as any as HTMLSourceElement);
-
-  for (const source of sources) {
-    addButton(source.src);
+  const videos = cachedPostVideos[postId];
+  for (const i in videoControls) {
+    for (const url of videos[i]) {
+      addButton(url, videoControls[i]);
+    }
   }
 }
 
@@ -797,11 +881,11 @@ function mutationsListener(
         config.videoDownloadButtons &&
         node.matches(".player__player")
       ) {
-        try {
-          addVideoDownloadButtons(node as HTMLDivElement);
-        } catch (error) {
-          console.error("[RPM] Error addVideoDownloadButtons(): ", error);
-        }
+        // try {
+        //   addVideoDownloadButtons(node as HTMLDivElement);
+        // } catch (error) {
+        //   error("Error addVideoDownloadButtons(): ", error);
+        // }
       }
     }
   }
@@ -925,7 +1009,7 @@ async function main() {
     display:flex;
     align-items:center;
     padding:0;
-    background:0 0
+    background:0 0  
   }
   .rpm-block-author:hover * {
     fill: var(--color-danger-800);
@@ -941,6 +1025,13 @@ async function main() {
     text-align: center;
     width: 100%;
     font-size: 0.9em;
+  }
+  
+  .rpm-video-list {
+    text-align: center;
+  }
+  .rpm-video-list a {
+    margin: 0 5px;
   }`);
 
   // process static posts
