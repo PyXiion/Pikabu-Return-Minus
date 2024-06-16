@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6
+// @version      0.6.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -809,23 +809,44 @@ function processPostVideos(story: HTMLDivElement, storyData: Pikabu.CommentsData
     return Array.from(story.querySelectorAll('.story-block_type_video'));
   }
 
-  function addUrlToPlayer(player: HTMLElement, urls: string[]) {
+  function createUrl(text: string, url: string) {
+    const urlElem = document.createElement('a');
+    urlElem.target = '_blank';
+  
+    urlElem.textContent = text;
+    urlElem.href = url;
+
+    return urlElem;
+  }
+
+  function addUrlToPlayer(videoBlock: HTMLElement, urls: string[]) {
+    const player = videoBlock.querySelector('.player') as HTMLDivElement;
+
+    // to check video origin
+    const dataType = player.getAttribute("data-type");
+
     const urlListElem = document.createElement('p');
     urlListElem.classList.add('rpm-video-list');
 
-    for (const url of urls) {
-      const urlElem = document.createElement('a');
-      urlElem.target = '_blank';
+    // if it's a pikabu video
+    if (dataType == "video-file") {
+      for (const url of urls) {
+        const extension = '.' + url.split('.').pop();
+  
+        urlListElem.appendChild(createUrl(extension, url));
+      }
+    } else {
+      // try get video url
+      const dataSource = player.getAttribute('data-source');
 
-      const extension = '.' + url.split('.').pop();
-
-      urlElem.textContent = extension;
-      urlElem.href = url;
-
-      urlListElem.appendChild(urlElem);
+      if (dataSource)
+        urlListElem.appendChild(createUrl('Источник', dataSource));
     }
 
-    player.parentElement.insertBefore(urlListElem, player.nextSibling);
+    if (urlListElem.hasChildNodes())
+      videoBlock.parentElement.insertBefore(urlListElem, videoBlock.nextSibling);
+    else
+      urlListElem.remove();
   }
 
   const playerElements = getPostPlayers();
