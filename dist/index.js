@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.1
+// @version      0.6.3
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -210,6 +210,7 @@ const config = {
     minusesPattern: null,
     minusesCommentPattern: null,
     ownCommentPattern: null,
+    unrollCommentariesAutomatically: false,
     videoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
     update() {
@@ -231,6 +232,7 @@ const config = {
         config.minusesPattern = makeEval("story", GM_config.get("minusesPattern").valueOf().replace("%d", "story.minuses"), (story) => story.minuses);
         config.minusesCommentPattern = makeEval("comment", GM_config.get("minusesCommentPattern").valueOf().replace("%d", "comment.minuses"), (comment) => comment.minuses);
         config.ownCommentPattern = makeEval("comment", GM_config.get("ownCommentPattern").valueOf(), (comment) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`);
+        config.unrollCommentariesAutomatically = GM_config.get("unrollCommentariesAutomatically").valueOf();
         config.videoDownloadButtons = GM_config.get("videoDownloadButtons").valueOf();
         config.showBlockAuthorForeverButton = GM_config.get("showBlockAuthorForeverButton").valueOf();
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
@@ -249,49 +251,77 @@ let isConfigInit = false;
 GM_config.init({
     id: "prm",
     title: (() => {
-        const title = document.createElement("a");
-        title.href = "https://t.me/return_pikabu";
-        title.textContent = "Return Pikabu minus";
-        return title;
+        const div = document.createElement('div');
+        const p1 = document.createElement('p');
+        p1.textContent = "Return Pikabu minus";
+        const links = [];
+        function addLink(text, url) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = text;
+            links.push(link);
+        }
+        addLink("Телеграм", "https://t.me/return_pikabu");
+        addLink("GitHub", "https://github.com/PyXiion/Pikabu-Return-Minus");
+        div.append(p1, ...links);
+        return div;
     })(),
     fields: {
-        minStoryRating: {
-            section: ["Основные настройки"],
-            type: "int",
-            default: config.minStoryRating,
-            label: "Посты с рейтингом ниже указанного будут удаляться из ленты.",
-        },
+        // ОБЩИЕ НАСТРОЙКИ
         summary: {
+            section: [
+                "Общие настройки",
+            ],
             type: "checkbox",
             default: config.summary,
             label: "Отображение суммарного рейтинга у постов и комментариев.",
+        },
+        minRatesCountToShowRatingBar: {
+            type: "int",
+            default: config.minRatesCountToShowRatingBar,
+            label: "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. " +
+                "Установите на 0, чтобы всегда показывать.",
+        },
+        // НАСТРОЙКИ ПОСТОВ
+        minStoryRating: {
+            section: [
+                "Настройки постов",
+            ],
+            type: "int",
+            default: config.minStoryRating,
+            label: "Посты с рейтингом ниже указанного будут удаляться из ленты. Вы сможете увидеть удалённые посты в списке просмотренных.",
         },
         ratingBar: {
             type: "checkbox",
             default: config.ratingBar,
             label: "Отображение соотношения плюсов и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.",
         },
+        showBlockAuthorForeverButton: {
+            type: "checkbox",
+            default: config.showBlockAuthorForeverButton,
+            label: "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. " +
+                "Вы должны быть авторизированы на сайте, иначе кнопка работать не будет.",
+        },
+        videoDownloadButtons: {
+            type: "checkbox",
+            label: "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
+            default: config.videoDownloadButtons,
+        },
+        // НАСТРОЙКИ КОММЕНТАРИЕВ
         ratingBarComments: {
+            section: [
+                "Настройки комментариев",
+            ],
             type: "checkbox",
             default: config.ratingBarComments,
             label: "Отображение соотношения плюсов и минусов у комментариев.",
         },
-        minRatesCountToShowRatingBar: {
-            type: "int",
-            default: config.minRatesCountToShowRatingBar,
-            label: "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. Установите на 0, чтобы всегда показывать.",
-        },
-        showBlockAuthorForeverButton: {
+        unrollCommentariesAutomatically: {
             type: "checkbox",
-            default: config.showBlockAuthorForeverButton,
-            label: "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. Требуется авторизация.",
+            default: config.unrollCommentariesAutomatically,
+            label: "Раскрывать все комментарии автоматически. Не рекомендую использовать со слабым интернетом."
         },
-        videoDownloadButtons: {
-            section: ["Дополнительно"],
-            type: "checkbox",
-            label: "Добавляет к встроенным видео в правом нижнем углу прямые ссылки на видео (обычно это mp4 и webm).",
-            default: config.videoDownloadButtons,
-        },
+        // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
         filteringPageRegex: {
             section: ["Продвинутые настройки"],
             type: "text",
@@ -301,22 +331,22 @@ GM_config.init({
         minusesPattern: {
             type: "text",
             default: "story.minuses",
-            label: "Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.\n" +
+            label: "Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Внутри может выполняться любой код, поэтому используйте с осторожностью.\n" +
                 "Шаблоны гарантированно работают только на Tampermonkey.",
         },
         minusesCommentPattern: {
             type: "text",
             default: "comment.minuses",
-            label: "Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.",
+            label: "Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
         },
         ownCommentPattern: {
             type: "text",
-            default: "(comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`",
-            label: "Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}. Может быть опасно, поэтому не рекомендуется вставлять подозрительные строки сюда.",
+            default: "comment.pluses == 0 && comment.minuses == 0 ? 0 : comment.pluses == comment.minuses ? `+${comment.pluses} / -${comment.minuses}` : comment.pluses == 0 ? `-${comment.minuses}` : comment.minuses == 0 ? `+${comment.pluses}` : `+${comment.pluses} / ${comment.rating} / -${comment.minuses}`",
+            label: "Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
         },
         debug: {
             type: "checkbox",
-            label: "Включить дополнительные логи в консоли.",
+            label: "Включить дополнительные логи в консоли. Для разработки и отладки.",
             default: config.debug
         },
     },
@@ -328,6 +358,29 @@ GM_config.init({
             config.update();
         },
     },
+    css: `
+  #prm .config_header p { margin: 0; }
+  #prm .config_header a { 
+    font-size: medium; 
+    margin: 0 10px;
+  }
+  #prm input { margin-right: 10px; }
+  #prm input[type=text] {
+    border: 1px solid #cccccc;
+    border-radius: 10px;
+    background: #ffffff !important;
+    outline: none;
+    height: 100%;
+   font-family: Tahoma;
+  }
+  #prm .config_var { 
+    margin: 10px 0;
+    display: flex
+  }
+  #prm .config_var .field_label {
+    padding-top: 4px;
+  }
+  `
 });
 const logPrefix = "[RPM]";
 function info(...args) {
@@ -642,6 +695,15 @@ function addVideoDownloadButtons(postId, url) {
         }
     }
 }
+function unrollComments(button) {
+    info('Раскручиваю ' + button.querySelector('span').textContent);
+    button.click();
+    setTimeout(() => {
+        if (document.body.contains(button)) {
+            unrollComments(button);
+        }
+    }, 500);
+}
 function mutationsListener(mutationList, observer) {
     for (const mutation of mutationList) {
         for (const node of mutation.addedNodes) {
@@ -655,13 +717,9 @@ function mutationsListener(mutationList, observer) {
                 const storyElem = node;
                 processStory(storyElem, false);
             }
-            else if (config.videoDownloadButtons &&
-                node.matches(".player__player")) {
-                // try {
-                //   addVideoDownloadButtons(node as HTMLDivElement);
-                // } catch (error) {
-                //   error("Error addVideoDownloadButtons(): ", error);
-                // }
+            else if (node.matches(".comment__more") && config.unrollCommentariesAutomatically) {
+                const button = node;
+                unrollComments(button);
             }
         }
     }
@@ -799,7 +857,17 @@ async function main() {
   }
   .rpm-video-list a {
     margin: 0 5px;
-  }`);
+  }
+
+  #prm {
+    border-radius: 10px;
+  }
+  @media only screen and (max-width: 768px)  {
+    #prm {
+      left: 2.5% !important;
+      width: 100% !important;
+    }
+  } `);
     // process static posts
     processStories(document.querySelectorAll("article.story"));
     observer = new MutationObserver(mutationsListener);
