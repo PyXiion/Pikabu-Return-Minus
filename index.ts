@@ -276,7 +276,7 @@ namespace Pikabu {
 //#endregion
 
 let enableFilters = null;
-const shouldProcessComments = window.location.href.includes("/story/");
+let shouldProcessComments = window.location.href.includes("/story/");
 
 const config = {
   debug: false,
@@ -608,6 +608,7 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+
 async function sendNotification(title: string, description: string, timeout: number = 2000) {
   function construct() {
     const notification = document.createElement('div');
@@ -860,6 +861,7 @@ function processOldStory(
 
   if (shouldProcessComments) {
     processStoryComments(storyData.story.id, storyData, 1);
+    shouldProcessComments = false;
   }
 
   return true;

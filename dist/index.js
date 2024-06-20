@@ -199,7 +199,7 @@ var Pikabu;
 })(Pikabu || (Pikabu = {}));
 //#endregion
 let enableFilters = null;
-const shouldProcessComments = window.location.href.includes("/story/");
+let shouldProcessComments = window.location.href.includes("/story/");
 const config = {
     debug: false,
     minStoryRating: 100,
@@ -634,6 +634,7 @@ function processOldStory(story, storyData) {
     }
     if (shouldProcessComments) {
         processStoryComments(storyData.story.id, storyData, 1);
+        shouldProcessComments = false;
     }
     return true;
 }
