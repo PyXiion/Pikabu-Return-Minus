@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.4
+// @version      0.6.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -211,7 +211,7 @@ const config = {
     minusesPattern: null,
     minusesCommentPattern: null,
     ownCommentPattern: null,
-    allCommentsLoadedNotification: true,
+    allCommentsLoadedNotification: false,
     unrollCommentariesAutomatically: false,
     videoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
