@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.6
+// @version      0.6.7
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -199,7 +199,8 @@ var Pikabu;
 })(Pikabu || (Pikabu = {}));
 //#endregion
 let enableFilters = null;
-let shouldProcessComments = window.location.href.includes("/story/");
+const isStoryPage = window.location.href.includes("/story/");
+const currentStoryId = parseInt(["0", ...window.location.href.split('_')].pop());
 const config = {
     debug: false,
     minStoryRating: 100,
@@ -555,6 +556,9 @@ function processComment(comment) {
     info('Обработал комметарий', comment.id);
 }
 async function processStoryComments(storyId, storyData, page) {
+    if (!isStoryPage || storyId != currentStoryId) {
+        return;
+    }
     for (const comment of storyData.comments) {
         processComment(comment);
     }
@@ -632,10 +636,7 @@ function processOldStory(story, storyData) {
             ratio = storyData.story.pluses / totalRates;
         addRatingBar(story, ratio);
     }
-    if (shouldProcessComments) {
-        processStoryComments(storyData.story.id, storyData, 1);
-        shouldProcessComments = false;
-    }
+    processStoryComments(storyData.story.id, storyData, 1);
     return true;
 }
 async function processStory(story, processComments) {
@@ -680,9 +681,7 @@ async function processStory(story, processComments) {
         summary.textContent = storyData.story.rating.toString();
         ratingElem.insertBefore(summary, ratingDown);
     }
-    if (shouldProcessComments) {
-        await processStoryComments(storyData.story.id, storyData, 1);
-    }
+    await processStoryComments(storyData.story.id, storyData, 1);
 }
 async function processStories(stories) {
     for (const story of stories) {
