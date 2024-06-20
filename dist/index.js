@@ -562,7 +562,7 @@ async function processStoryComments(storyId, storyData, page) {
         storyData = await Pikabu.DataService.fetchStory(storyId, page + 1);
         await processStoryComments(storyId, storyData, page + 1);
     }
-    else {
+    else if (config.allCommentsLoadedNotification) {
         sendNotification('Return Pikabu Minus', 'Все рейтинги комментариев загружены!');
     }
 }
