@@ -237,12 +237,14 @@ namespace Pikabu {
   export class CommentsData extends StoryData {
     public comments: Comment[];
     public selectedCommentId: number;
+    public hasMoreComments: boolean;
 
     public constructor(payload: PikabuJson.StoryGetResponse) {
       super(payload);
 
       this.selectedCommentId = 0;
       this.comments = payload.comments.map((x) => new Comment(x));
+      this.hasMoreComments = payload.has_next_page_comments;
     }
   }
 
@@ -292,6 +294,7 @@ const config = {
   minusesCommentPattern: null,
 
   ownCommentPattern: null,
+  allCommentsLoadedNotification: false,
 
   unrollCommentariesAutomatically: false,
 
@@ -299,17 +302,18 @@ const config = {
 
   showBlockAuthorForeverButton: true,
 
+  booleanOption(key: string) {
+    config[key] = GM_config.get(key).valueOf() as boolean;
+  },
   update() {
-    config.debug = GM_config.get("debug").valueOf() as boolean;
+    this.booleanOption("debug");
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
-    config.summary = GM_config.get("summary").valueOf() as boolean;
+    this.booleanOption("summary");
     config.filteringPageRegex = GM_config.get(
       "filteringPageRegex"
     ).valueOf() as string;
-    config.ratingBar = GM_config.get("ratingBar").valueOf() as boolean;
-    config.ratingBarComments = GM_config.get(
-      "ratingBarComments"
-    ).valueOf() as boolean;
+    this.booleanOption("ratingBar");
+    this.booleanOption("ratingBarComments");
     config.minRatesCountToShowRatingBar = GM_config.get(
       "minRatesCountToShowRatingBar"
     ).valueOf() as number;
@@ -344,13 +348,10 @@ const config = {
       (comment: any) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`,
     );
 
-    config.unrollCommentariesAutomatically = GM_config.get("unrollCommentariesAutomatically").valueOf() as boolean;
-
-    config.videoDownloadButtons = GM_config.get(
-      "videoDownloadButtons"
-    ).valueOf() as boolean;
-
-    config.showBlockAuthorForeverButton = GM_config.get("showBlockAuthorForeverButton").valueOf() as boolean;
+    this.booleanOption("unrollCommentariesAutomatically");
+    this.booleanOption("videoDownloadButtons");
+    this.booleanOption("showBlockAuthorForeverButton");
+    this.booleanOption("allCommentsLoadedNotification");
 
     enableFilters = new RegExp(config.filteringPageRegex).test(
       window.location.href
@@ -455,6 +456,12 @@ GM_config.init({
       default: config.unrollCommentariesAutomatically,
       label: 
         "Раскрывать все комментарии автоматически. Не рекомендую использовать со слабым интернетом."
+    },
+    allCommentsLoadedNotification: {
+      type: "checkbox",
+      default: config.allCommentsLoadedNotification,
+      label:
+        "Показывать уведомление о загрузке всех комментариев под постом."
     },
 
     // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
@@ -595,6 +602,55 @@ const blockIconTemplate = (function () {
   return div.firstChild;
 })();
 
+// UI functions
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sendNotification(title: string, description: string, timeout: number = 2000) {
+  function construct() {
+    const notification = document.createElement('div');
+    notification.classList.add('rpm-notification');
+
+    const header = document.createElement('div');
+    header.classList.add('rpm-notification-header');
+
+    header.textContent = title;
+
+    const content = document.createElement('div');
+    content.classList.add('rpm-notification-content');
+
+    content.textContent = description;
+
+    notification.append(header, content);
+
+    return notification;
+  }
+  
+  const notification = construct();
+  document.body.append(notification);
+
+  const animationTime = 600.0;
+
+  notification.style.animationDuration = `${animationTime / 1000.0}s`;
+  notification.style.animationTimingFunction = "cubic-bezier(.18,.89,.32,1.28)";
+
+  // Intro
+  notification.style.animationName = "rpm-notification-intro";
+  await sleep(animationTime);
+
+  await sleep(timeout);
+  // Outro
+  notification.style.animationTimingFunction = "linear";
+  notification.style.animationName = "rpm-notification-outro";
+  notification.style.opacity = "0";
+  await sleep(animationTime);
+
+  // Remove
+  notification.remove();
+}
+
 // Functions
 async function blockAuthorForever(button: HTMLButtonElement, authorId: number) {
   button.disabled = true;
@@ -710,9 +766,11 @@ async function processStoryComments(
     processComment(comment);
   }
 
-  if (storyData.comments.length >= 100) {
+  if (storyData.hasMoreComments) {
     storyData = await Pikabu.DataService.fetchStory(storyId, page + 1);
     await processStoryComments(storyId, storyData, page + 1);
+  } else {
+    sendNotification('Return Pikabu Minus', 'Все рейтинги комментариев загружены!');
   }
 }
 
@@ -800,7 +858,9 @@ function processOldStory(
     addRatingBar(story, ratio);
   }
 
-  processStoryComments(storyData.story.id, storyData, 1);
+  if (shouldProcessComments) {
+    processStoryComments(storyData.story.id, storyData, 1);
+  }
 
   return true;
 }
@@ -1148,7 +1208,54 @@ async function main() {
       left: 2.5% !important;
       width: 100% !important;
     }
-  } `);
+  } 
+
+  /* Notifications */
+  @keyframes rpm-notification-intro {
+    from {
+      translate: -100%;
+    }
+    
+    to {
+      translate: 0%;
+    }
+  }
+  
+  @keyframes rpm-notification-outro {
+    from {
+      translate: 0 0%;
+      opacity: 1.0;
+    }
+    
+    to {
+      translate: 0 -200%;
+      opacity: 0;
+    }
+  }
+  
+  .rpm-notification {
+    position: fixed;
+    bottom: 15px;
+    left: 15px;
+    z-index: 9999;
+    overflow: hidden;
+
+    max-width: 250px;
+    
+    background: var(--color-black-100);
+    border-radius: 10px;
+    border: 1px solid var(--color-black-440);
+
+    pointer-events: none;
+  }
+  .rpm-notification * {
+    padding: 5px 15px;
+  }
+  .rpm-notification-header {  
+    background: var(--color-primary-800);
+    color: white;
+    font-weight: bolder;
+  }`);
 
   // process static posts
   processStories(document.querySelectorAll("article.story"));

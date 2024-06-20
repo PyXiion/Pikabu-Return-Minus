@@ -172,6 +172,7 @@ var Pikabu;
             super(payload);
             this.selectedCommentId = 0;
             this.comments = payload.comments.map((x) => new Comment(x));
+            this.hasMoreComments = payload.has_next_page_comments;
         }
     }
     Pikabu.CommentsData = CommentsData;
@@ -210,16 +211,20 @@ const config = {
     minusesPattern: null,
     minusesCommentPattern: null,
     ownCommentPattern: null,
+    allCommentsLoadedNotification: true,
     unrollCommentariesAutomatically: false,
     videoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
+    booleanOption(key) {
+        config[key] = GM_config.get(key).valueOf();
+    },
     update() {
-        config.debug = GM_config.get("debug").valueOf();
+        this.booleanOption("debug");
         config.minStoryRating = GM_config.get("minStoryRating").valueOf();
-        config.summary = GM_config.get("summary").valueOf();
+        this.booleanOption("summary");
         config.filteringPageRegex = GM_config.get("filteringPageRegex").valueOf();
-        config.ratingBar = GM_config.get("ratingBar").valueOf();
-        config.ratingBarComments = GM_config.get("ratingBarComments").valueOf();
+        this.booleanOption("ratingBar");
+        this.booleanOption("ratingBarComments");
         config.minRatesCountToShowRatingBar = GM_config.get("minRatesCountToShowRatingBar").valueOf();
         function makeEval(args, str, defaultFunc) {
             try {
@@ -232,9 +237,10 @@ const config = {
         config.minusesPattern = makeEval("story", GM_config.get("minusesPattern").valueOf().replace("%d", "story.minuses"), (story) => story.minuses);
         config.minusesCommentPattern = makeEval("comment", GM_config.get("minusesCommentPattern").valueOf().replace("%d", "comment.minuses"), (comment) => comment.minuses);
         config.ownCommentPattern = makeEval("comment", GM_config.get("ownCommentPattern").valueOf(), (comment) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`);
-        config.unrollCommentariesAutomatically = GM_config.get("unrollCommentariesAutomatically").valueOf();
-        config.videoDownloadButtons = GM_config.get("videoDownloadButtons").valueOf();
-        config.showBlockAuthorForeverButton = GM_config.get("showBlockAuthorForeverButton").valueOf();
+        this.booleanOption("unrollCommentariesAutomatically");
+        this.booleanOption("videoDownloadButtons");
+        this.booleanOption("showBlockAuthorForeverButton");
+        this.booleanOption("allCommentsLoadedNotification");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -320,6 +326,11 @@ GM_config.init({
             type: "checkbox",
             default: config.unrollCommentariesAutomatically,
             label: "Раскрывать все комментарии автоматически. Не рекомендую использовать со слабым интернетом."
+        },
+        allCommentsLoadedNotification: {
+            type: "checkbox",
+            default: config.allCommentsLoadedNotification,
+            label: "Показывать уведомление о загрузке всех комментариев под постом."
         },
         // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
         filteringPageRegex: {
@@ -432,6 +443,40 @@ const blockIconTemplate = (function () {
     div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__save"><use xlink:href="#icon--ui__ban"></use></svg>`;
     return div.firstChild;
 })();
+// UI functions
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+async function sendNotification(title, description, timeout = 2000) {
+    function construct() {
+        const notification = document.createElement('div');
+        notification.classList.add('rpm-notification');
+        const header = document.createElement('div');
+        header.classList.add('rpm-notification-header');
+        header.textContent = title;
+        const content = document.createElement('div');
+        content.classList.add('rpm-notification-content');
+        content.textContent = description;
+        notification.append(header, content);
+        return notification;
+    }
+    const notification = construct();
+    document.body.append(notification);
+    const animationTime = 600.0;
+    notification.style.animationDuration = `${animationTime / 1000.0}s`;
+    notification.style.animationTimingFunction = "cubic-bezier(.18,.89,.32,1.28)";
+    // Intro
+    notification.style.animationName = "rpm-notification-intro";
+    await sleep(animationTime);
+    await sleep(timeout);
+    // Outro
+    notification.style.animationTimingFunction = "linear";
+    notification.style.animationName = "rpm-notification-outro";
+    notification.style.opacity = "0";
+    await sleep(animationTime);
+    // Remove
+    notification.remove();
+}
 // Functions
 async function blockAuthorForever(button, authorId) {
     button.disabled = true;
@@ -513,9 +558,12 @@ async function processStoryComments(storyId, storyData, page) {
     for (const comment of storyData.comments) {
         processComment(comment);
     }
-    if (storyData.comments.length >= 100) {
+    if (storyData.hasMoreComments) {
         storyData = await Pikabu.DataService.fetchStory(storyId, page + 1);
         await processStoryComments(storyId, storyData, page + 1);
+    }
+    else {
+        sendNotification('Return Pikabu Minus', 'Все рейтинги комментариев загружены!');
     }
 }
 function addRatingBar(story, ratio) {
@@ -584,7 +632,9 @@ function processOldStory(story, storyData) {
             ratio = storyData.story.pluses / totalRates;
         addRatingBar(story, ratio);
     }
-    processStoryComments(storyData.story.id, storyData, 1);
+    if (shouldProcessComments) {
+        processStoryComments(storyData.story.id, storyData, 1);
+    }
     return true;
 }
 async function processStory(story, processComments) {
@@ -882,7 +932,54 @@ async function main() {
       left: 2.5% !important;
       width: 100% !important;
     }
-  } `);
+  } 
+
+  /* Notifications */
+  @keyframes rpm-notification-intro {
+    from {
+      translate: -100%;
+    }
+    
+    to {
+      translate: 0%;
+    }
+  }
+  
+  @keyframes rpm-notification-outro {
+    from {
+      translate: 0 0%;
+      opacity: 1.0;
+    }
+    
+    to {
+      translate: 0 -200%;
+      opacity: 0;
+    }
+  }
+  
+  .rpm-notification {
+    position: fixed;
+    bottom: 15px;
+    left: 15px;
+    z-index: 9999;
+    overflow: hidden;
+
+    max-width: 250px;
+    
+    background: var(--color-black-100);
+    border-radius: 10px;
+    border: 1px solid var(--color-black-440);
+
+    pointer-events: none;
+  }
+  .rpm-notification * {
+    padding: 5px 15px;
+  }
+  .rpm-notification-header {  
+    background: var(--color-primary-800);
+    color: white;
+    font-weight: bolder;
+  }`);
     // process static posts
     processStories(document.querySelectorAll("article.story"));
     observer = new MutationObserver(mutationsListener);
