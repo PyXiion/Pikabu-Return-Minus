@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.3
+// @version      0.6.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -425,6 +425,7 @@ class CommentData {
 // Variables
 const cachedComments = new Map();
 let oldInterface = null;
+const deferredComments = new Map();
 const cachedPostVideos = new Map();
 const blockIconTemplate = (function () {
     const div = document.createElement("div");
@@ -466,18 +467,28 @@ function addBlockButton(story) {
 function processComment(comment) {
     const commentElem = document.getElementById(`comment_${comment.id}`);
     if (commentElem === null) {
-        if (comment instanceof Pikabu.Comment)
+        if (comment instanceof Pikabu.Comment) {
             cachedComments[comment.id] = new CommentData(comment);
+            info('Закэшировал комментарий', comment.id);
+        }
         return;
     }
     const userElem = commentElem.querySelector(".comment__user");
+    const ratingDown = commentElem.querySelector(".comment__rating-down");
+    if (!userElem || !ratingDown) {
+        // Defer comment
+        info('У комментария', comment.id, ' нет юзера или кнопок рейтинга, кэширую его');
+        // setTimeout(() => processComment(comment), 400);
+        cachedComments[comment.id] = (comment instanceof Pikabu.Comment) ? new CommentData(comment) : comment;
+        return;
+    }
     if (userElem.hasAttribute("data-own") &&
         userElem.getAttribute("data-own") === "true") {
         const textRatingElem = commentElem.querySelector(".comment__rating-count");
         textRatingElem.innerText = config.formatOwnRating(comment);
+        info('Обработал "свой" комментарий', comment.id);
         return;
     }
-    const ratingDown = commentElem.querySelector(".comment__rating-down");
     const minusesText = document.createElement("div");
     minusesText.classList.add("comment__rating-count");
     ratingDown.prepend(minusesText);
@@ -496,6 +507,7 @@ function processComment(comment) {
             ratio = comment.pluses / totalRates;
         addRatingBar(commentElem, ratio);
     }
+    info('Обработал комметарий', comment.id);
 }
 async function processStoryComments(storyId, storyData, page) {
     for (const comment of storyData.comments) {
@@ -711,14 +723,17 @@ function mutationsListener(mutationList, observer) {
                 continue;
             if (node.matches(".comment__header")) {
                 const commentElem = node.closest(".comment");
+                info('Поймал голову комментария!', commentElem);
                 processCached(commentElem);
             }
             else if (node.matches("article.story")) {
                 const storyElem = node;
+                info('Поймал пост!', storyElem);
                 processStory(storyElem, false);
             }
             else if (node.matches(".comment__more") && config.unrollCommentariesAutomatically) {
                 const button = node;
+                info('Поймал кнопку!', button);
                 unrollComments(button);
             }
         }
