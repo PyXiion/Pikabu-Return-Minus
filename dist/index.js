@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.7
+// @version      0.6.8
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -625,7 +625,7 @@ function processOldStory(story, storyData) {
         if (isMobile)
             summary.classList.add("story__rating-rpm-count", "rpm-summary");
         else
-            summary.classList.add("story__rating-count");
+            summary.classList.add("story__rating-count", "rpm-story-summary");
         summary.textContent = storyData.story.rating.toString();
         ratingDown.parentElement.insertBefore(summary, ratingDown);
     }
@@ -821,10 +821,13 @@ async function main() {
     margin: 0px !important;
   }
   .story__rating-down {
-    margin-left: 0 !important;
+    margin-top: 0 !important;
   }
   .story__rating-count {
     margin: 7px 0 7px;
+  }
+  .rpm-story-summary {
+    margin: 14px 0 14px;
   }
   .rpm-summary-comment {
     margin-right: 8px;
