@@ -848,7 +848,7 @@ function processOldStory(
     const summary = document.createElement("div");
     if (isMobile)
       summary.classList.add("story__rating-rpm-count", "rpm-summary");
-    else summary.classList.add("story__rating-count");
+    else summary.classList.add("story__rating-count", "rpm-story-summary");
     summary.textContent = storyData.story.rating.toString();
 
     ratingDown.parentElement.insertBefore(summary, ratingDown);
@@ -1098,10 +1098,13 @@ async function main() {
     margin: 0px !important;
   }
   .story__rating-down {
-    margin-left: 0 !important;
+    margin-top: 0 !important;
   }
   .story__rating-count {
     margin: 7px 0 7px;
+  }
+  .rpm-story-summary {
+    margin: 14px 0 14px;
   }
   .rpm-summary-comment {
     margin-right: 8px;
