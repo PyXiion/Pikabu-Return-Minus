@@ -215,6 +215,7 @@ const config = {
     allCommentsLoadedNotification: false,
     unrollCommentariesAutomatically: false,
     videoDownloadButtons: true,
+    socialLinks: true,
     showBlockAuthorForeverButton: true,
     booleanOption(key) {
         config[key] = GM_config.get(key).valueOf();
@@ -242,6 +243,7 @@ const config = {
         this.booleanOption("videoDownloadButtons");
         this.booleanOption("showBlockAuthorForeverButton");
         this.booleanOption("allCommentsLoadedNotification");
+        this.booleanOption("socialLinks");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -313,6 +315,11 @@ GM_config.init({
             type: "checkbox",
             label: "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
             default: config.videoDownloadButtons,
+        },
+        socialLinks: {
+            type: "checkbox",
+            label: "Добавляет в начале заголовка поста значки Телеграма, ВК, Тиктока, если в посте есть соответствующие ссылки.",
+            default: config.socialLinks
         },
         // НАСТРОЙКИ КОММЕНТАРИЕВ
         ratingBarComments: {
@@ -585,6 +592,52 @@ function addRatingBar(story, ratio) {
         // TODO mobile
     }
 }
+const linkTypes = [
+    {
+        domains: [
+            "t.me"
+        ],
+        iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="rpm-story-icon icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg>`,
+        style: "fill: black;",
+    },
+    {
+        domains: [
+            "vk.com"
+        ],
+        iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="rpm-story-icon icon icon--social__vk"><use xlink:href="#icon--social__vk"></use></svg>`,
+        style: "fill: black;",
+    },
+    {
+        domains: [
+            "tiktok.com"
+        ],
+        iconHtml: `<svg class="rpm-story-icon icon" fill="#000000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" xml:space="preserve"><path d="M19.589 6.686a4.793 4.793 0 0 1-3.77-4.245V2h-3.445v13.672a2.896 2.896 0 0 1-5.201 1.743l-.002-.001.002.001a2.895 2.895 0 0 1 3.183-4.51v-3.5a6.329 6.329 0 0 0-5.394 10.692 6.33 6.33 0 0 0 10.857-4.424V8.687a8.182 8.182 0 0 0 4.773 1.526V6.79a4.831 4.831 0 0 1-1.003-.104z"/></svg>`
+    }
+];
+async function checkStoryLinks(story) {
+    const linkElems = story.getElementsByTagName('a');
+    function addIcon(linkType) {
+        const div = document.createElement('div');
+        div.innerHTML = linkType.iconHtml.trim();
+        const elem = div.firstElementChild;
+        if (linkType.style) {
+            elem.setAttribute("style", linkType.style);
+        }
+        // Add before the title
+        const titleElem = story.querySelector('.story__title');
+        titleElem.prepend(elem);
+    }
+    linkTypeFor: for (const linkType of linkTypes) {
+        for (const domain of linkType.domains) {
+            for (const linkElem of linkElems) {
+                if (linkElem.href.includes(domain)) {
+                    addIcon(linkType);
+                    continue linkTypeFor;
+                }
+            }
+        }
+    }
+}
 function processOldStory(story, storyData) {
     let ratingElem = story.querySelector(".story__footer-rating > div");
     let isMobile = false;
@@ -644,6 +697,10 @@ async function processStory(story, processComments) {
     if (config.showBlockAuthorForeverButton) {
         addBlockButton(story);
     }
+    // Links
+    if (config.socialLinks) {
+        checkStoryLinks(story);
+    }
     const storyId = parseInt(story.getAttribute("data-story-id"));
     // get story data
     const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
@@ -657,31 +714,7 @@ async function processStory(story, processComments) {
     // videos
     if (config.videoDownloadButtons)
         processPostVideos(story, storyData);
-    // determine post style
-    if (oldInterface === true) {
-        processOldStory(story, storyData);
-        return;
-    }
-    const ratingElem = story.querySelector(".story__rating");
-    if (ratingElem === null) {
-        if (oldInterface === null && !processOldStory(story, storyData)) {
-            warn("У поста нет элементов рейтинга.", story);
-        }
-        return;
-    }
-    oldInterface = false;
-    const ratingDown = ratingElem.querySelector(".story__rating-down");
-    const minusesText = document.createElement("div");
-    minusesText.classList.add("story__rating-rpm-count");
-    ratingDown.prepend(minusesText);
-    minusesText.textContent = config.formatMinuses(storyData.story);
-    if (config.summary) {
-        const summary = document.createElement("div");
-        summary.classList.add("story__rating-rpm-count", "rpm-summary");
-        summary.textContent = storyData.story.rating.toString();
-        ratingElem.insertBefore(summary, ratingDown);
-    }
-    await processStoryComments(storyData.story.id, storyData, 1);
+    processOldStory(story, storyData);
 }
 async function processStories(stories) {
     for (const story of stories) {
@@ -925,6 +958,12 @@ async function main() {
   }
   .rpm-video-list a {
     margin: 0 5px;
+  }
+  .rpm-story-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
   }
 
   #prm {
