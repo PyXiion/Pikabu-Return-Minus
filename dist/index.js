@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.8
+// @version      0.6.9
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -593,13 +593,15 @@ function addRatingBar(story, ratio) {
     }
 }
 const linkTypes = [
+    // Telegram
     {
         domains: [
             "t.me"
         ],
         iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="rpm-story-icon icon icon--social__telegram"><use xlink:href="#icon--social__telegram"></use></svg>`,
-        style: "fill: black;",
+        style: "fill: #24A1DE;",
     },
+    // VK
     {
         domains: [
             "vk.com"
@@ -607,12 +609,14 @@ const linkTypes = [
         iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="rpm-story-icon icon icon--social__vk"><use xlink:href="#icon--social__vk"></use></svg>`,
         style: "fill: black;",
     },
+    // TIKTOK
     {
         domains: [
             "tiktok.com"
         ],
         iconHtml: `<svg class="rpm-story-icon icon" fill="#000000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" xml:space="preserve"><path d="M19.589 6.686a4.793 4.793 0 0 1-3.77-4.245V2h-3.445v13.672a2.896 2.896 0 0 1-5.201 1.743l-.002-.001.002.001a2.895 2.895 0 0 1 3.183-4.51v-3.5a6.329 6.329 0 0 0-5.394 10.692 6.33 6.33 0 0 0 10.857-4.424V8.687a8.182 8.182 0 0 0 4.773 1.526V6.79a4.831 4.831 0 0 1-1.003-.104z"/></svg>`
     },
+    // Boosty
     {
         domains: [
             "boosty.to"
