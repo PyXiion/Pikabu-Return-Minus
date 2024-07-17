@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.9
+// @version      0.6.10
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -869,7 +869,6 @@ const linkTypes: LinkType[] = [
 async function checkStoryLinks(
   story: HTMLDivElement
 ) {
-  const linkElems = story.getElementsByTagName('a');
 
   function addIcon(linkType: LinkType) {
     const div = document.createElement('div');
@@ -884,6 +883,8 @@ async function checkStoryLinks(
     const titleElem = story.querySelector('.story__title');
     titleElem.prepend(elem);
   }
+
+  const linkElems = Array.from(story.querySelectorAll('.story__content a')) as HTMLAnchorElement[];
 
   linkTypeFor: for (const linkType of linkTypes) {
     for (const domain of linkType.domains) {
