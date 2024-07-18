@@ -121,6 +121,17 @@ declare namespace PikabuJson
   };
 }
 
+declare namespace RpmJson {
+  interface AuthInfo {
+    id: number;
+    secret: string;
+  }
+
+  interface StoryGet {
+    minuses: number;
+  }
+}
+
 // GM_config
 /*
 Copyright 2009+, GM_config Contributors (https://github.com/sizzlemctwizzle/GM_config)

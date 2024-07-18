@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from schemas import StoryInfo, AuthInfo, Choice
 from typing import Optional
 from sqlalchemy.orm import Session
-import models
+import models, secrets
 from database import SessionLocal, engine
 
 models.Base.metadata.create_all(bind=engine)
@@ -29,7 +29,11 @@ def check_auth_info(db: Session, info: AuthInfo, exception: bool = True) -> bool
   return True
 
 @app.post('/user/register')
-async def register
+async def register(db: Session = Depends(get_db)) -> AuthInfo:
+  db_user = models.User(secret = secrets.token_urlsafe(64))
+  db.add(db_user)
+  db.commit()
+  return AuthInfo(id=db_user.id, secret=db_user.secret)
 
 @app.post('/story/{story_id}/get')
 async def get_story(auth: Optional[AuthInfo], story_id: int, db: Session = Depends(get_db)) -> StoryInfo:

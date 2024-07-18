@@ -275,6 +275,63 @@ namespace Pikabu {
 }
 //#endregion
 
+//#region RPM API
+namespace RPM {
+  const DOMAIN = "http://127.0.0.1:8000/";
+
+  async function request<T = any>(controller: string, data: object = null) {
+    const response = await fetch(DOMAIN + controller, {
+      method: "POST",
+      body: data !== null ? JSON.stringify(data) : null
+    });
+    
+    if (response.status !== 200) {
+      throw new Error("Failed to access " + DOMAIN + controller);
+    }
+
+    return await response.json() as T;
+  }
+
+  export class Session {
+    private userId: number = -1;
+    private secret: string = null;
+
+    public constructor(userId: number, secret: string) {
+      this.userId = userId;
+      this.secret = secret;
+    }
+
+    public getStoryInfo(storyId: number) {
+      return request<RpmJson.StoryGet>("story/" + storyId + "/get");
+    }
+
+    public async setMinus(storyId: number, setted: boolean) {
+      const choice = setted ? "-1" : "0";
+      await request("story/" + storyId + "/vote?choice=" + choice)
+    }
+
+    public static async register() {
+      const authInfo = await request<RpmJson.AuthInfo>("user/register");
+      return new Session(authInfo.id, authInfo.secret);
+    }
+
+    public static async registerOrLoadFromSettings() {
+      const saved: any = GM.getValue("rpmSecret");
+      if (saved === undefined) {
+        const session = await this.register();
+        GM.setValue("rpmSecret", JSON.stringify({
+          id: session.userId,
+          secret: session.secret
+        }));
+        return session;
+      } else {
+        return new Session(saved.id, saved.secret);
+      }
+    }
+  }
+}
+//#endregion
+
 let enableFilters = null;
 
 const isStoryPage = window.location.href.includes("/story/");
@@ -304,10 +361,13 @@ const config = {
 
   showBlockAuthorForeverButton: true,
 
+  enableRpmApi: false,
+
   booleanOption(key: string) {
     config[key] = GM_config.get(key).valueOf() as boolean;
   },
   update() {
+    this.booleanOption("enableRpmApi");
     this.booleanOption("debug");
     config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
     this.booleanOption("summary");
@@ -413,6 +473,13 @@ GM_config.init({
         "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. " +
         "Установите на 0, чтобы всегда показывать.",
     },
+    enableRpmApi: {
+      type: "checkbox",
+      default: config.enableRpmApi,
+      label:
+        "Расширение использует Return Pikabu Minus API, если включено. Добавляет дополнительные возможности. " + 
+        "Автоматически регистрирует вас на сервере и отправляет туда поставленные минусы."
+    },
 
     // НАСТРОЙКИ ПОСТОВ
     minStoryRating: {
@@ -506,15 +573,34 @@ GM_config.init({
   events: {
     init() {
       isConfigInit = true;
+      this.css.basic = [];
     },
     save() {
       config.update();
     },
   },
   css: `
-  #prm .config_header p { margin: 0; }
-  #prm .config_header a { 
-    font-size: medium; 
+  #prm * { font-family: arial,tahoma,myriad pro,sans-serif }
+#prm { background: #FFF; margin: 0; }
+#prm .field_label { font-size: 14px; font-weight: bold; margin-right: 6px; line-height: 1.5em; }
+#prm .radio_label { font-size: 14px; }
+#prm .block { display: block; }
+#prm .saveclose_buttons { margin: 16px 10px 10px; padding: 2px 12px; }
+#prm #prm_buttons_holder { padding: 15px; }
+#prm .reset, #prm .reset a, #prm_buttons_holder { color: #000; text-align: right; }
+#prm .config_desc, #prm .section_desc, #prm .reset { font-size: 9pt; }
+#prm .center { text-align: center; }
+#prm .section_header_holder > *:not(:first-child) { 
+/*   margin-top: 8px; */
+  margin: 8px;
+}
+#prm .config_var { margin: 0 0 4px; }
+#prm .section_header { background: #414141; border: 1px solid #000; color: #FFF;
+ font-size: 13pt; margin: 0; }
+#prm .section_desc { background: #EFEFEF; border: 1px solid #CCC; color: #575757; font-size: 9pt; margin: 0 0 6px; }
+
+  #prm .config_header p { margin: 0; font-size: 20pt; }
+  #prm .config_header a {
     margin: 0 10px;
   }
   #prm input { margin-right: 10px; }
@@ -526,7 +612,7 @@ GM_config.init({
     height: 100%;
    font-family: Tahoma;
   }
-  #prm .config_var { 
+  #prm .config_var {
     margin: 10px 0;
     display: flex
   }
@@ -596,6 +682,8 @@ let oldInterface = null;
 const deferredComments = new Map<number, CommentData>();
 const cachedPostVideos = new Map<number, string[][]>();
 
+var rpmSession: RPM.Session = null;
+
 const blockIconTemplate = (function () {
   const div = document.createElement("div");
   div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--ui__save"><use xlink:href="#icon--ui__ban"></use></svg>`;
@@ -607,7 +695,6 @@ const blockIconTemplate = (function () {
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
 
 async function sendNotification(title: string, description: string, timeout: number = 2000) {
   function construct() {
@@ -927,6 +1014,10 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   await processStoryComments(storyData.story.id, storyData, 1);
 }
 
+async function rpmProcessStory(story: HTMLDivElement) {
+  
+}
+
 async function processStories(stories: Iterable<HTMLDivElement>) {
   for (const story of stories) {
     processStory(story, false);
@@ -1090,6 +1181,12 @@ async function main() {
   await waitConfig;
   config.update(); // Just in case.
 
+  // RPM API
+  if (config.enableRpmApi) {
+    rpmSession = await RPM.Session.registerOrLoadFromSettings();
+  }
+
+  // CSS
   addCss(`.story__rating-up {
     margin-right: 5px !important;
   }

@@ -11,7 +11,6 @@ class User(Base):
 
   secret = Column(String)
   create_date = Column(DateTime, server_default=func.now())
-  last_usage = Column(DateTime, server_default=func.now())
   
   story_choices = relationship("StoryChoice", back_populates="owner")
 

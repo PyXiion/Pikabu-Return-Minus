@@ -198,6 +198,56 @@ var Pikabu;
     })(DataService = Pikabu.DataService || (Pikabu.DataService = {}));
 })(Pikabu || (Pikabu = {}));
 //#endregion
+//#region RPM API
+var RPM;
+(function (RPM) {
+    const DOMAIN = "http://127.0.0.1:8000/";
+    async function request(controller, data = null) {
+        const response = await fetch(DOMAIN + controller, {
+            method: "POST",
+            body: data !== null ? JSON.stringify(data) : null
+        });
+        if (response.status !== 200) {
+            throw new Error("Failed to access " + DOMAIN + controller);
+        }
+        return await response.json();
+    }
+    class Session {
+        constructor(userId, secret) {
+            this.userId = -1;
+            this.secret = null;
+            this.userId = userId;
+            this.secret = secret;
+        }
+        getStoryInfo(storyId) {
+            return request("story/" + storyId + "/get");
+        }
+        async setMinus(storyId, setted) {
+            const choice = setted ? "-1" : "0";
+            await request("story/" + storyId + "/vote?choice=" + choice);
+        }
+        static async register() {
+            const authInfo = await request("user/register");
+            return new Session(authInfo.id, authInfo.secret);
+        }
+        static async registerOrLoadFromSettings() {
+            const saved = GM.getValue("rpmSecret");
+            if (saved === undefined) {
+                const session = await this.register();
+                GM.setValue("rpmSecret", JSON.stringify({
+                    id: session.userId,
+                    secret: session.secret
+                }));
+                return session;
+            }
+            else {
+                return new Session(saved.id, saved.secret);
+            }
+        }
+    }
+    RPM.Session = Session;
+})(RPM || (RPM = {}));
+//#endregion
 let enableFilters = null;
 const isStoryPage = window.location.href.includes("/story/");
 const currentStoryId = parseInt(["0", ...window.location.href.split('_')].pop());
@@ -365,15 +415,34 @@ GM_config.init({
     events: {
         init() {
             isConfigInit = true;
+            this.css.basic = [];
         },
         save() {
             config.update();
         },
     },
     css: `
-  #prm .config_header p { margin: 0; }
-  #prm .config_header a { 
-    font-size: medium; 
+  #prm * { font-family: arial,tahoma,myriad pro,sans-serif }
+#prm { background: #FFF; margin: 0; }
+#prm .field_label { font-size: 14px; font-weight: bold; margin-right: 6px; line-height: 1.5em; }
+#prm .radio_label { font-size: 14px; }
+#prm .block { display: block; }
+#prm .saveclose_buttons { margin: 16px 10px 10px; padding: 2px 12px; }
+#prm #prm_buttons_holder { padding: 15px; }
+#prm .reset, #prm .reset a, #prm_buttons_holder { color: #000; text-align: right; }
+#prm .config_desc, #prm .section_desc, #prm .reset { font-size: 9pt; }
+#prm .center { text-align: center; }
+#prm .section_header_holder > *:not(:first-child) { 
+/*   margin-top: 8px; */
+  margin: 8px;
+}
+#prm .config_var { margin: 0 0 4px; }
+#prm .section_header { background: #414141; border: 1px solid #000; color: #FFF;
+ font-size: 13pt; margin: 0; }
+#prm .section_desc { background: #EFEFEF; border: 1px solid #CCC; color: #575757; font-size: 9pt; margin: 0 0 6px; }
+
+  #prm .config_header p { margin: 0; font-size: 20pt; }
+  #prm .config_header a {
     margin: 0 10px;
   }
   #prm input { margin-right: 10px; }
@@ -385,7 +454,7 @@ GM_config.init({
     height: 100%;
    font-family: Tahoma;
   }
-  #prm .config_var { 
+  #prm .config_var {
     margin: 10px 0;
     display: flex
   }
@@ -813,6 +882,8 @@ function addSettingsOpenButton() {
 async function main() {
     await waitConfig;
     config.update(); // Just in case.
+    // RPM API
+    // CSS
     addCss(`.story__rating-up {
     margin-right: 5px !important;
   }
