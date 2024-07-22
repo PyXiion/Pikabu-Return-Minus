@@ -830,7 +830,7 @@ const linkTypes: LinkType[] = [
     domains: [
       "vk.com"
     ],
-    iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="rpm-story-icon icon icon--social__vk"><use xlink:href="#icon--social__vk"></use></svg>`,
+    iconHtml: `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon--social__vk"><use xlink:href="#icon--social__vk"></use></svg>`,
     style: "fill: black;",
   },
   // TIKTOK
@@ -838,14 +838,14 @@ const linkTypes: LinkType[] = [
     domains: [
       "tiktok.com"
     ],
-    iconHtml: `<svg class="rpm-story-icon icon" fill="#000000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" xml:space="preserve"><path d="M19.589 6.686a4.793 4.793 0 0 1-3.77-4.245V2h-3.445v13.672a2.896 2.896 0 0 1-5.201 1.743l-.002-.001.002.001a2.895 2.895 0 0 1 3.183-4.51v-3.5a6.329 6.329 0 0 0-5.394 10.692 6.33 6.33 0 0 0 10.857-4.424V8.687a8.182 8.182 0 0 0 4.773 1.526V6.79a4.831 4.831 0 0 1-1.003-.104z"/></svg>`
+    iconHtml: `<svg class="icon" fill="#000000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" xml:space="preserve"><path d="M19.589 6.686a4.793 4.793 0 0 1-3.77-4.245V2h-3.445v13.672a2.896 2.896 0 0 1-5.201 1.743l-.002-.001.002.001a2.895 2.895 0 0 1 3.183-4.51v-3.5a6.329 6.329 0 0 0-5.394 10.692 6.33 6.33 0 0 0 10.857-4.424V8.687a8.182 8.182 0 0 0 4.773 1.526V6.79a4.831 4.831 0 0 1-1.003-.104z"/></svg>`
   },
   // Boosty
   {
     domains: [
       "boosty.to"
     ],
-    iconHtml:`<svg class="rpm-story-icon icon" fill="#000000" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="50 50 217.4 197.4">
+    iconHtml:`<svg class="icon" fill="#000000" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" viewBox="50 50 217.4 197.4">
                 <style type="text/css">
                   .st0{fill:#242B2C;}
                   .st1{fill:url(#SVGID_1_);}
@@ -869,15 +869,14 @@ const linkTypes: LinkType[] = [
 async function checkStoryLinks(
   story: HTMLDivElement
 ) {
-
-  function addIcon(linkType: LinkType) {
-    const div = document.createElement('div');
-    div.innerHTML = linkType.iconHtml.trim();
-    const elem = div.firstElementChild as HTMLElement;
+  function addIcon(linkType: LinkType, element: HTMLAnchorElement) {
+    const elem = element.cloneNode() as HTMLAnchorElement;
+    elem.innerHTML = linkType.iconHtml.trim();
 
     if (linkType.style) {
       elem.setAttribute("style", linkType.style);
     }
+    elem.classList.add('rpm-story-icon');
 
     // Add before the title
     const titleElem = story.querySelector('.story__title');
@@ -885,12 +884,14 @@ async function checkStoryLinks(
   }
 
   const linkElems = Array.from(story.querySelectorAll('.story__content a')) as HTMLAnchorElement[];
+  linkElems.reverse();
+  // Iterate reversibly so that the last link is added to the icon list
 
   linkTypeFor: for (const linkType of linkTypes) {
     for (const domain of linkType.domains) {
       for (const linkElem of linkElems) {
         if (linkElem.href.includes(domain)) {
-          addIcon(linkType);
+          addIcon(linkType, linkElem);
           continue linkTypeFor;
         }
       }
@@ -1247,7 +1248,7 @@ async function main() {
   display:flex;
   align-items:center;
   padding:0;
-  background:0 0  
+  background:0 0
 }
 .rpm-block-author:hover * {
   fill: var(--color-danger-800);
@@ -1271,10 +1272,24 @@ async function main() {
   margin: 0 5px;
 }
 .rpm-story-icon {
-  display: inline-block;
+  width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  margin-right: 6px;
+  vertical-align: text-top;
+  border-radius: 3px;
+}
+.rpm-story-icon svg {
+  margin-top: auto;
+  padding: 2px 0px;
   width: 16px;
   height: 16px;
-  margin-right: 6px;
+  margin: 0;
+  transition: all ease 300ms;
+}
+.rpm-story-icon:hover svg {
+  width: 18px;
+  height: 18px;
 }
 #prm {
   border-radius: 10px;
