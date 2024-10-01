@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.12
+// @version      0.6.13
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -206,6 +206,7 @@ const config = {
     minStoryRating: 100,
     summary: true,
     filteringPageRegex: "^https?:\\/\\/pikabu.ru\\/(|best|companies)$",
+    blockPaidAuthors: false,
     ratingBar: false,
     ratingBarComments: false,
     minRatesCountToShowRatingBar: 10,
@@ -243,6 +244,7 @@ const config = {
         this.booleanOption("videoDownloadButtons");
         this.booleanOption("showBlockAuthorForeverButton");
         this.booleanOption("allCommentsLoadedNotification");
+        this.booleanOption("blockPaidAuthors");
         this.booleanOption("socialLinks");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
@@ -310,6 +312,11 @@ GM_config.init({
             default: config.showBlockAuthorForeverButton,
             label: "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. " +
                 "Вы должны быть авторизированы на сайте, иначе кнопка работать не будет.",
+        },
+        blockPaidAuthors: {
+            type: "checkbox",
+            default: config.blockPaidAuthors,
+            label: "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
         },
         videoDownloadButtons: {
             type: "checkbox",
@@ -730,9 +737,21 @@ async function processStory(story, processComments) {
     if (config.socialLinks) {
         checkStoryLinks(story);
     }
+    // Block paid stories
+    if (enableFilters &&
+        config.blockPaidAuthors &&
+        story.querySelector(".user__label[data-type=\"pikabu-plus\"]") !== null) {
+        story.remove();
+        info("Удалил пост", story, "как проплаченный:", `${config.blockPaidAuthors} = true`);
+        return;
+    }
     const storyId = parseInt(story.getAttribute("data-story-id"));
     // get story data
     const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
+    if (storyData === null || storyData === undefined) {
+        warn("Не удалось получить пост #", storyId);
+        return;
+    }
     // delete the story if its ratings < the min rating
     if (enableFilters &&
         storyData.story.rating < config.minStoryRating) {
