@@ -53,6 +53,14 @@ declare namespace PikabuJson
     story_data: StoryDataElement;
   }
 
+  interface CommentVideoInfo {
+    url: string
+  }
+
+  interface CommentDescription {
+    videos: CommentVideoInfo[]
+  }
+
   interface Comment
   {
     /**
@@ -81,6 +89,8 @@ declare namespace PikabuJson
      * Comment minuses
      */
     comment_minuses: number;
+
+    comment_desc: CommentDescription
   }
 
   interface Error

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.13
+// @version      0.6.14
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -82,6 +82,10 @@ class HttpRequest {
 }
 
 //#endregion
+
+
+
+
 
 //#region Pikabu API
 
@@ -216,6 +220,7 @@ namespace Pikabu {
 
   export class Comment extends RatingObject {
     public parentId: number;
+    public videos: string[];
 
     public constructor(payload: PikabuJson.Comment) {
       super();
@@ -224,6 +229,7 @@ namespace Pikabu {
       this.rating = payload.comment_rating ?? 0;
       this.pluses = payload.comment_pluses ?? 0;
       this.minuses = payload.comment_minuses ?? 0;
+      this.videos = (payload.comment_desc.videos ?? []).flatMap((v) => v.url);
     }
   }
 
@@ -241,7 +247,6 @@ namespace Pikabu {
 
     public constructor(payload: PikabuJson.StoryGetResponse) {
       super(payload);
-
       this.selectedCommentId = 0;
       this.comments = payload.comments.map((x) => new Comment(x));
       this.hasMoreComments = payload.has_next_page_comments;
@@ -304,6 +309,8 @@ const config = {
   videoDownloadButtons: true,
   socialLinks: true,
 
+  commentVideoDownloadButtons: true,
+
   showBlockAuthorForeverButton: true,
 
   booleanOption(key: string) {
@@ -356,7 +363,8 @@ const config = {
     this.booleanOption("videoDownloadButtons");
     this.booleanOption("showBlockAuthorForeverButton");
     this.booleanOption("allCommentsLoadedNotification");
-    this.booleanOption("blockPaidAuthors")
+    this.booleanOption("blockPaidAuthors");
+    this.booleanOption("commentVideoDownloadButtons");
 
     this.booleanOption("socialLinks");
 
@@ -483,6 +491,12 @@ GM_config.init({
       label:
         "Показывать уведомление о загрузке всех комментариев под постом."
     },
+    commentVideoDownloadButtons: {
+      type: "checkbox",
+      default: config.commentVideoDownloadButtons,
+      label:
+        "Добавляет ко всем видео в комментариях ссылки на источники, если их возможно найти."
+    },
 
     // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
     filteringPageRegex: {
@@ -599,12 +613,14 @@ class CommentData {
   public rating: number;
   public pluses: number;
   public minuses: number;
+  public videos: string[];
 
   public constructor(data: Pikabu.Comment) {
     this.id = data.id;
     this.rating = data.rating;
     this.pluses = data.pluses;
     this.minuses = data.minuses;
+    this.videos = data.videos;
   }
 }
 
@@ -771,6 +787,27 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     if (totalRates > 0) ratio = comment.pluses / totalRates;
 
     addRatingBar(commentElem, ratio);
+  }
+
+  // Comment videos
+  if (config.commentVideoDownloadButtons) {
+    const videoElements = commentElem.querySelectorAll(':scope > .comment__body .comment-external-video');
+    const videoCount = Math.min(videoElements.length, comment.videos.length)
+    console.log(videoElements);
+    
+    for (let i = 0; i < videoCount; ++i) {
+      const elem = videoElements[i];
+      const url = comment.videos[i];
+
+      const linkElem = document.createElement('a');
+      linkElem.classList.add('rpm-download-video-button');
+      linkElem.href = url;
+      linkElem.text = 'Источник';
+      linkElem.target = '_blank';
+      
+      
+      elem.parentNode.insertBefore(linkElem, elem.nextSibling);
+    }
   }
 
   info('Обработал комметарий', comment.id)
@@ -1108,6 +1145,8 @@ function addVideoDownloadButtons(postId: number, url: string) {
 
     // add link to controls
     videoControls.append(a);
+
+    
   }
 
   const videos = cachedPostVideos[postId];
@@ -1261,8 +1300,6 @@ async function main() {
   padding-left:2px  ;
 }
 .rpm-download-video-button {
-  color: var(--color-bright-900);
-  font-size: 125%;
   margin-left: 3px;
 }
 .rpm-block-author {

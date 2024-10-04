@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.13
+// @version      0.6.14
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -158,6 +158,7 @@ var Pikabu;
             this.rating = payload.comment_rating ?? 0;
             this.pluses = payload.comment_pluses ?? 0;
             this.minuses = payload.comment_minuses ?? 0;
+            this.videos = (payload.comment_desc.videos ?? []).flatMap((v) => v.url);
         }
     }
     Pikabu.Comment = Comment;
@@ -217,6 +218,7 @@ const config = {
     unrollCommentariesAutomatically: false,
     videoDownloadButtons: true,
     socialLinks: true,
+    commentVideoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
     booleanOption(key) {
         config[key] = GM_config.get(key).valueOf();
@@ -245,6 +247,7 @@ const config = {
         this.booleanOption("showBlockAuthorForeverButton");
         this.booleanOption("allCommentsLoadedNotification");
         this.booleanOption("blockPaidAuthors");
+        this.booleanOption("commentVideoDownloadButtons");
         this.booleanOption("socialLinks");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
@@ -347,6 +350,11 @@ GM_config.init({
             default: config.allCommentsLoadedNotification,
             label: "Показывать уведомление о загрузке всех комментариев под постом."
         },
+        commentVideoDownloadButtons: {
+            type: "checkbox",
+            default: config.commentVideoDownloadButtons,
+            label: "Добавляет ко всем видео в комментариях ссылки на источники, если их возможно найти."
+        },
         // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
         filteringPageRegex: {
             section: ["Продвинутые настройки"],
@@ -446,6 +454,7 @@ class CommentData {
         this.rating = data.rating;
         this.pluses = data.pluses;
         this.minuses = data.minuses;
+        this.videos = data.videos;
     }
 }
 // Variables
@@ -566,6 +575,22 @@ function processComment(comment) {
         if (totalRates > 0)
             ratio = comment.pluses / totalRates;
         addRatingBar(commentElem, ratio);
+    }
+    // Comment videos
+    if (config.commentVideoDownloadButtons) {
+        const videoElements = commentElem.querySelectorAll(':scope > .comment__body .comment-external-video');
+        const videoCount = Math.min(videoElements.length, comment.videos.length);
+        console.log(videoElements);
+        for (let i = 0; i < videoCount; ++i) {
+            const elem = videoElements[i];
+            const url = comment.videos[i];
+            const linkElem = document.createElement('a');
+            linkElem.classList.add('rpm-download-video-button');
+            linkElem.href = url;
+            linkElem.text = 'Источник';
+            linkElem.target = '_blank';
+            elem.parentNode.insertBefore(linkElem, elem.nextSibling);
+        }
     }
     info('Обработал комметарий', comment.id);
 }
@@ -969,8 +994,6 @@ async function main() {
   padding-left:2px  ;
 }
 .rpm-download-video-button {
-  color: var(--color-bright-900);
-  font-size: 125%;
   margin-left: 3px;
 }
 .rpm-block-author {
