@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.14
+// @version      0.6.15
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
 // @match        *://pikabu.ru/*
 // @connect      api.pikabu.ru
 // @connect      pikabu.ru
+// @connect      rpm.pyxiion.ru
 // @grant        GM.xmlHttpRequest
 // @grant        GM.getValue
 // @grant        GM.setValue
@@ -25,7 +26,7 @@ interface HttpRequestCallback {
   onSuccess(response: GM.Response<undefined>): void;
 }
 
-class HttpRequest {
+abstract class AbstractHttpRequest {
   protected headers: Map<string, string>;
   protected httpMethod: HttpMethod;
   protected url: string;
@@ -47,10 +48,7 @@ class HttpRequest {
     return this;
   }
 
-  // virtual
-  protected getData(): any {
-    return {};
-  }
+  protected abstract getData(): any;
 
   public execute(callback: HttpRequestCallback) {
     const details: GM.Request<undefined> = {
@@ -72,13 +70,28 @@ class HttpRequest {
   }
 
   public executeAsync() {
-    return new Promise<GM.Response<undefined>>((resolve, reject) => {
+    const promise = new Promise<GM.Response<undefined>>((resolve, reject) => {
       this.execute({
         onError: reject,
         onSuccess: resolve,
       });
     });
+    promise.catch(console.error);
+    return promise;
   }
+}
+
+class HttpRequest extends AbstractHttpRequest {
+  protected body: any;
+
+  public setBody(body: any) {
+    this.body = body;
+  }
+
+  protected getData() {
+    return this.body;
+  }
+
 }
 
 //#endregion
@@ -107,7 +120,7 @@ namespace Pikabu {
     }
   }
 
-  class Request extends HttpRequest {
+  class Request extends AbstractHttpRequest {
     private controller: PikabuController;
     private params: PikabuJson.RequestParams;
 
@@ -280,6 +293,39 @@ namespace Pikabu {
 }
 //#endregion
 
+
+
+
+//#region RPM API
+
+namespace RPM {
+  const DOMAIN = 'https://rpm.pyxiion.ru/'
+
+  export async function register() {
+    const response = (await post(DOMAIN + 'register', {})) as RpmJson.RegisterResponse;
+    return response.secret;
+  }
+
+  export async function getUserInfo(id: number, user_uuid: string): Promise<RpmJson.InfoResponse> {
+    const response = (await post(DOMAIN + `user/${id}/info`, user_uuid !== '' ? {user_uuid} : {})) as RpmJson.InfoResponse;
+    return response;
+  }
+
+  export function voteUser(id: number, vote: [-1, 0, 1], user_uuid: string) {
+    return post(DOMAIN + `user/${id}/vote`, {user_uuid, vote} );
+  }
+
+  async function post(url: string, json: Object): Promise<Object> {
+    const request = new HttpRequest(url);
+    request.setBody(json);
+    const response = await request.executeAsync();
+    return response.response;
+  }
+}
+
+//#endregion
+
+
 let enableFilters = null;
 
 const isStoryPage = window.location.href.includes("/story/");
@@ -293,6 +339,7 @@ const config = {
 
   filteringPageRegex: "^https?:\\/\\/pikabu.ru\\/(|best|companies)$",
   blockPaidAuthors: false,
+  rpmMinRating: 0,
 
   ratingBar: false,
   ratingBarComments: false,
@@ -313,21 +360,19 @@ const config = {
 
   showBlockAuthorForeverButton: true,
 
-  booleanOption(key: string) {
-    config[key] = GM_config.get(key).valueOf() as boolean;
+  uuid: "",
+
+  option(key: string) {
+    config[key] = GM_config.get(key).valueOf();
   },
   update() {
-    this.booleanOption("debug");
-    config.minStoryRating = GM_config.get("minStoryRating").valueOf() as number;
-    this.booleanOption("summary");
-    config.filteringPageRegex = GM_config.get(
-      "filteringPageRegex"
-    ).valueOf() as string;
-    this.booleanOption("ratingBar");
-    this.booleanOption("ratingBarComments");
-    config.minRatesCountToShowRatingBar = GM_config.get(
-      "minRatesCountToShowRatingBar"
-    ).valueOf() as number;
+    this.option("debug");
+    this.option("minStoryRating")
+    this.option("summary");
+    this.option("filteringPageRegex")
+    this.option("ratingBar");
+    this.option("ratingBarComments");
+    this.option("minRatesCountToShowRatingBar")
 
     function makeEval(args: string, str: string, defaultFunc: Function) {
       try {
@@ -359,14 +404,16 @@ const config = {
       (comment: any) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`,
     );
 
-    this.booleanOption("unrollCommentariesAutomatically");
-    this.booleanOption("videoDownloadButtons");
-    this.booleanOption("showBlockAuthorForeverButton");
-    this.booleanOption("allCommentsLoadedNotification");
-    this.booleanOption("blockPaidAuthors");
-    this.booleanOption("commentVideoDownloadButtons");
+    this.option("unrollCommentariesAutomatically");
+    this.option("videoDownloadButtons");
+    this.option("showBlockAuthorForeverButton");
+    this.option("allCommentsLoadedNotification");
+    this.option("blockPaidAuthors");
+    this.option("commentVideoDownloadButtons");
 
-    this.booleanOption("socialLinks");
+    this.option("socialLinks");
+    this.option("rpmMinRating");
+    this.option("uuid");
 
     enableFilters = new RegExp(config.filteringPageRegex).test(
       window.location.href
@@ -455,6 +502,12 @@ GM_config.init({
       label:
         "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
     },
+    rpmMinRating: {
+      type: "int",
+      default: config.rpmMinRating,
+      label:
+        "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
+    },
 
 
     videoDownloadButtons: {
@@ -534,6 +587,30 @@ GM_config.init({
         "Включить дополнительные логи в консоли. Для разработки и отладки.",
       default: config.debug
     },
+    uuid: {
+      type: "hidden",
+      // label:
+      //   "Ваш уникальный UUID в системе рейтинга RPM. Позволяет вам оценивать профили других пользователей.",
+      default: config.uuid
+    },
+    registerRpm: {
+      type: "button",
+      label:
+        "Зарегистрироваться в системе RPM",
+      async click() {
+        if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
+          config.uuid = await RPM.register();
+          GM_config.set('uuid', config.uuid);
+          GM_config.save();
+          sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
+          
+          await sleep(300);
+          window.location.reload();
+        } else {
+          sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
+        }
+      }
+    }
   },
   events: {
     init() {
@@ -1058,6 +1135,116 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     processPostVideos(story, storyData);
 
   processOldStory(story, storyData);
+
+  processRpm(story);
+}
+
+async function voteUser(id: number, vote: number) {
+  if (vote === null) return;
+  if (config.uuid === undefined || config.uuid === null || config.uuid === '') {
+    sendNotification('Ошибка', 'Вы не авторизованы в RPM: ' + config.uuid);
+    return;
+  }
+
+  const response = (await RPM.voteUser(id, vote as any, config.uuid)) as any;
+  if (!('result' in response) || response.result !== 'ok') {
+    sendNotification('Ошибка', JSON.stringify(response));
+  }
+}
+
+async function processRpm(story: HTMLDivElement) {
+  // Prepare info
+  const authorId = parseInt(story.getAttribute('data-author-id'));
+
+  const userInfoRowElem = story.querySelector('.story__user-info');
+  if (userInfoRowElem === null)
+    return;
+
+  // Create elements
+  const elem = document.createElement('div');
+  elem.classList.add('rpm-user-rating-info', 'hint');
+  elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
+
+  function addSpan(cls: string) {
+    const e = document.createElement('span');
+    e.className = cls;
+    elem.appendChild(e);
+
+    return e;
+  }
+
+  const plusBtn = addSpan("rpm-user-rating-info-pluses");
+  addSpan("rpm-user-rating-info-rating");
+  const minusBtn = addSpan("rpm-user-rating-info-minuses");
+
+  // Make them clickable
+  if (config.uuid !== '') {
+    plusBtn.addEventListener('click',  () => vote(+1));
+    minusBtn.addEventListener('click', () => vote(-1));
+  } else {
+    const askAuth = () => sendNotification('Ошибка', 'Зайдите в настройки и зарегистрирутесь в системе RPM для голосования за авторов.');
+    plusBtn.addEventListener('click',  askAuth);
+    minusBtn.addEventListener('click', askAuth);
+  }
+
+  userInfoRowElem.prepend(elem);
+
+  const authorInfo = await RPM.getUserInfo(authorId, config.uuid);
+
+  // Delete the story if rating is less than required
+  const rating = authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses;
+  if (rating < config.rpmMinRating && enableFilters) {
+    story.remove();
+    info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinRating);
+  }
+
+  // Update counters
+  updateOne(story);
+
+  // Update counters of a story
+  function updateOne(story: HTMLDivElement) {
+    const plusBtn = story.querySelector(".rpm-user-rating-info-pluses") as HTMLSpanElement;
+    const ratingElem = story.querySelector(".rpm-user-rating-info-rating") as HTMLSpanElement;
+    const minusBtn = story.querySelector(".rpm-user-rating-info-minuses") as HTMLSpanElement;
+
+    plusBtn.innerText = authorInfo.pluses.toString();
+    ratingElem.innerText = (authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses).toString();
+    minusBtn.innerText = authorInfo.minuses.toString();
+    story.setAttribute('rpm-author-own-vote', authorInfo.own_vote?.toString());
+  }
+
+  // Update all counters of the author
+  function updateAll() {
+    document.querySelectorAll(`article.story[data-author-id="${authorId}"]`).forEach(updateOne);
+  }
+
+  // Vote button callback
+  function vote(vote: number) {
+    const oldVote = authorInfo.own_vote ?? 0;
+    if (vote == authorInfo.own_vote) {
+      authorInfo.own_vote -= vote;
+      vote = 0;
+    } else {
+      vote += oldVote;
+      authorInfo.own_vote = vote;
+    }
+
+    if (oldVote == 1)
+      authorInfo.pluses--;
+    else if (oldVote == -1)
+      authorInfo.minuses--;
+
+    if (vote == 1)
+      authorInfo.pluses++;
+    else if (vote == -1)
+      authorInfo.minuses++;
+
+    updateAll();
+
+    warn(vote)
+    voteUser(authorId, vote);
+  }
+
 }
 
 async function processStories(stories: Iterable<HTMLDivElement>) {
@@ -1224,6 +1411,10 @@ function addSettingsOpenButton() {
 async function main() {
   await waitConfig;
   config.update(); // Just in case.
+
+  if (config.uuid !== '') {
+    delete GM_config.fields['registerRpm'];
+  }
 
   addCss(`.story__footer .story__rating-up {
   margin-right: 5px !important;
@@ -1398,6 +1589,36 @@ async function main() {
   background: var(--color-primary-800);
   color: white;
   font-weight: bolder;
+}
+.rpm-user-rating-info {
+  padding: 0 10px;
+  border-radius: 5px;
+  display: inline-block;
+  background-color: var(--color-black-alpha-005);
+  margin-right: 10px;
+  user-select: none;
+  white-space: nowrap;
+}
+.rpm-user-rating-info-rating {
+  display: inline-block;
+  margin: 0 7px;
+  min-width: 10px;
+  text-align: center;
+}
+.rpm-user-rating-info span {
+  cursor: pointer;
+}
+.rpm-user-rating-info-pluses {
+  color: var(--color-primary-700);
+}
+.rpm-user-rating-info-minuses {
+  color: var(--color-danger-900);
+}
+article.story[rpm-author-own-vote="1"] .rpm-user-rating-info {
+  background-color: var(--color-primary-200)
+}
+article.story[rpm-author-own-vote="-1"] .rpm-user-rating-info {
+  background-color: var(--color-danger-200)
 }
 `);
 

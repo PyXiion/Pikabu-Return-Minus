@@ -131,6 +131,35 @@ declare namespace PikabuJson
   };
 }
 
+declare namespace RpmJson {
+  interface AuthRequired {
+    user_uuid: string;
+  }
+
+  interface AuthOptional {
+    user_uuid?: string;
+  }
+
+  interface RegisterRequest {}
+
+  interface RegisterResponse {
+    secret: string;
+  }
+
+  interface VoteRequest extends AuthRequired {
+    vote: [-1, 0, 1];
+  }
+
+  interface InfoRequest extends AuthOptional {}
+
+  interface InfoResponse {
+    pluses: number;
+    minuses: number;
+    base_rating: number;
+    own_vote?: number;
+  }
+}
+
 // GM_config
 /*
 Copyright 2009+, GM_config Contributors (https://github.com/sizzlemctwizzle/GM_config)

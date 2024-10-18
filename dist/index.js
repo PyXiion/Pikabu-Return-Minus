@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.14
+// @version      0.6.15
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
 // @match        *://pikabu.ru/*
 // @connect      api.pikabu.ru
 // @connect      pikabu.ru
+// @connect      rpm.pyxiion.ru
 // @grant        GM.xmlHttpRequest
 // @grant        GM.getValue
 // @grant        GM.setValue
@@ -15,7 +16,7 @@
 // @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @license      MIT
 // ==/UserScript==
-class HttpRequest {
+class AbstractHttpRequest {
     constructor(url) {
         this.url = url;
         this.httpMethod = "POST";
@@ -29,10 +30,6 @@ class HttpRequest {
     setHttpMethod(httpMethod) {
         this.httpMethod = httpMethod;
         return this;
-    }
-    // virtual
-    getData() {
-        return {};
     }
     execute(callback) {
         const details = {
@@ -50,12 +47,22 @@ class HttpRequest {
         GM.xmlHttpRequest(details);
     }
     executeAsync() {
-        return new Promise((resolve, reject) => {
+        const promise = new Promise((resolve, reject) => {
             this.execute({
                 onError: reject,
                 onSuccess: resolve,
             });
         });
+        promise.catch(console.error);
+        return promise;
+    }
+}
+class HttpRequest extends AbstractHttpRequest {
+    setBody(body) {
+        this.body = body;
+    }
+    getData() {
+        return this.body;
     }
 }
 //#endregion
@@ -72,7 +79,7 @@ var Pikabu;
     }
     API.USER_AGENT = "ru.pikabu.android/1.21.15 (SM-N975F Android 7.1.2)";
     API.COOKIE = "unqKms867=aba48a160c; rm5bH=8c68fbfe3dc5e5f5b23a9ec1a8f784f8";
-    class Request extends HttpRequest {
+    class Request extends AbstractHttpRequest {
         constructor(domain, controller, params) {
             super(domain + controller);
             this.controller = controller;
@@ -199,6 +206,32 @@ var Pikabu;
     })(DataService = Pikabu.DataService || (Pikabu.DataService = {}));
 })(Pikabu || (Pikabu = {}));
 //#endregion
+//#region RPM API
+var RPM;
+(function (RPM) {
+    const DOMAIN = 'https://rpm.pyxiion.ru/';
+    async function register() {
+        const response = (await post(DOMAIN + 'register', {}));
+        return response.secret;
+    }
+    RPM.register = register;
+    async function getUserInfo(id, user_uuid) {
+        const response = (await post(DOMAIN + `user/${id}/info`, user_uuid !== '' ? { user_uuid } : {}));
+        return response;
+    }
+    RPM.getUserInfo = getUserInfo;
+    function voteUser(id, vote, user_uuid) {
+        return post(DOMAIN + `user/${id}/vote`, { user_uuid, vote });
+    }
+    RPM.voteUser = voteUser;
+    async function post(url, json) {
+        const request = new HttpRequest(url);
+        request.setBody(json);
+        const response = await request.executeAsync();
+        return response.response;
+    }
+})(RPM || (RPM = {}));
+//#endregion
 let enableFilters = null;
 const isStoryPage = window.location.href.includes("/story/");
 const currentStoryId = parseInt(["0", ...window.location.href.split('_')].pop());
@@ -208,6 +241,7 @@ const config = {
     summary: true,
     filteringPageRegex: "^https?:\\/\\/pikabu.ru\\/(|best|companies)$",
     blockPaidAuthors: false,
+    rpmMinRating: 0,
     ratingBar: false,
     ratingBarComments: false,
     minRatesCountToShowRatingBar: 10,
@@ -220,17 +254,18 @@ const config = {
     socialLinks: true,
     commentVideoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
-    booleanOption(key) {
+    uuid: "",
+    option(key) {
         config[key] = GM_config.get(key).valueOf();
     },
     update() {
-        this.booleanOption("debug");
-        config.minStoryRating = GM_config.get("minStoryRating").valueOf();
-        this.booleanOption("summary");
-        config.filteringPageRegex = GM_config.get("filteringPageRegex").valueOf();
-        this.booleanOption("ratingBar");
-        this.booleanOption("ratingBarComments");
-        config.minRatesCountToShowRatingBar = GM_config.get("minRatesCountToShowRatingBar").valueOf();
+        this.option("debug");
+        this.option("minStoryRating");
+        this.option("summary");
+        this.option("filteringPageRegex");
+        this.option("ratingBar");
+        this.option("ratingBarComments");
+        this.option("minRatesCountToShowRatingBar");
         function makeEval(args, str, defaultFunc) {
             try {
                 return new Function(args, "return " + str);
@@ -242,13 +277,15 @@ const config = {
         config.minusesPattern = makeEval("story", GM_config.get("minusesPattern").valueOf().replace("%d", "story.minuses"), (story) => story.minuses);
         config.minusesCommentPattern = makeEval("comment", GM_config.get("minusesCommentPattern").valueOf().replace("%d", "comment.minuses"), (comment) => comment.minuses);
         config.ownCommentPattern = makeEval("comment", GM_config.get("ownCommentPattern").valueOf(), (comment) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`);
-        this.booleanOption("unrollCommentariesAutomatically");
-        this.booleanOption("videoDownloadButtons");
-        this.booleanOption("showBlockAuthorForeverButton");
-        this.booleanOption("allCommentsLoadedNotification");
-        this.booleanOption("blockPaidAuthors");
-        this.booleanOption("commentVideoDownloadButtons");
-        this.booleanOption("socialLinks");
+        this.option("unrollCommentariesAutomatically");
+        this.option("videoDownloadButtons");
+        this.option("showBlockAuthorForeverButton");
+        this.option("allCommentsLoadedNotification");
+        this.option("blockPaidAuthors");
+        this.option("commentVideoDownloadButtons");
+        this.option("socialLinks");
+        this.option("rpmMinRating");
+        this.option("uuid");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -321,6 +358,11 @@ GM_config.init({
             default: config.blockPaidAuthors,
             label: "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
         },
+        rpmMinRating: {
+            type: "int",
+            default: config.rpmMinRating,
+            label: "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
+        },
         videoDownloadButtons: {
             type: "checkbox",
             label: "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
@@ -383,6 +425,29 @@ GM_config.init({
             label: "Включить дополнительные логи в консоли. Для разработки и отладки.",
             default: config.debug
         },
+        uuid: {
+            type: "hidden",
+            // label:
+            //   "Ваш уникальный UUID в системе рейтинга RPM. Позволяет вам оценивать профили других пользователей.",
+            default: config.uuid
+        },
+        registerRpm: {
+            type: "button",
+            label: "Зарегистрироваться в системе RPM",
+            async click() {
+                if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
+                    config.uuid = await RPM.register();
+                    GM_config.set('uuid', config.uuid);
+                    GM_config.save();
+                    sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
+                    await sleep(300);
+                    window.location.reload();
+                }
+                else {
+                    sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
+                }
+            }
+        }
     },
     events: {
         init() {
@@ -788,6 +853,96 @@ async function processStory(story, processComments) {
     if (config.videoDownloadButtons)
         processPostVideos(story, storyData);
     processOldStory(story, storyData);
+    processRpm(story);
+}
+async function voteUser(id, vote) {
+    if (vote === null)
+        return;
+    if (config.uuid === undefined || config.uuid === null || config.uuid === '') {
+        sendNotification('Ошибка', 'Вы не авторизованы в RPM: ' + config.uuid);
+        return;
+    }
+    const response = (await RPM.voteUser(id, vote, config.uuid));
+    if (!('result' in response) || response.result !== 'ok') {
+        sendNotification('Ошибка', JSON.stringify(response));
+    }
+}
+async function processRpm(story) {
+    // Prepare info
+    const authorId = parseInt(story.getAttribute('data-author-id'));
+    const userInfoRowElem = story.querySelector('.story__user-info');
+    if (userInfoRowElem === null)
+        return;
+    // Create elements
+    const elem = document.createElement('div');
+    elem.classList.add('rpm-user-rating-info', 'hint');
+    elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
+    function addSpan(cls) {
+        const e = document.createElement('span');
+        e.className = cls;
+        elem.appendChild(e);
+        return e;
+    }
+    const plusBtn = addSpan("rpm-user-rating-info-pluses");
+    addSpan("rpm-user-rating-info-rating");
+    const minusBtn = addSpan("rpm-user-rating-info-minuses");
+    // Make them clickable
+    if (config.uuid !== '') {
+        plusBtn.addEventListener('click', () => vote(+1));
+        minusBtn.addEventListener('click', () => vote(-1));
+    }
+    else {
+        const askAuth = () => sendNotification('Ошибка', 'Зайдите в настройки и зарегистрирутесь в системе RPM для голосования за авторов.');
+        plusBtn.addEventListener('click', askAuth);
+        minusBtn.addEventListener('click', askAuth);
+    }
+    userInfoRowElem.prepend(elem);
+    const authorInfo = await RPM.getUserInfo(authorId, config.uuid);
+    // Delete the story if rating is less than required
+    const rating = authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses;
+    if (rating < config.rpmMinRating && enableFilters) {
+        story.remove();
+        info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinRating);
+    }
+    // Update counters
+    updateOne(story);
+    // Update counters of a story
+    function updateOne(story) {
+        const plusBtn = story.querySelector(".rpm-user-rating-info-pluses");
+        const ratingElem = story.querySelector(".rpm-user-rating-info-rating");
+        const minusBtn = story.querySelector(".rpm-user-rating-info-minuses");
+        plusBtn.innerText = authorInfo.pluses.toString();
+        ratingElem.innerText = (authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses).toString();
+        minusBtn.innerText = authorInfo.minuses.toString();
+        story.setAttribute('rpm-author-own-vote', authorInfo.own_vote?.toString());
+    }
+    // Update all counters of the author
+    function updateAll() {
+        document.querySelectorAll(`article.story[data-author-id="${authorId}"]`).forEach(updateOne);
+    }
+    // Vote button callback
+    function vote(vote) {
+        const oldVote = authorInfo.own_vote ?? 0;
+        if (vote == authorInfo.own_vote) {
+            authorInfo.own_vote -= vote;
+            vote = 0;
+        }
+        else {
+            vote += oldVote;
+            authorInfo.own_vote = vote;
+        }
+        if (oldVote == 1)
+            authorInfo.pluses--;
+        else if (oldVote == -1)
+            authorInfo.minuses--;
+        if (vote == 1)
+            authorInfo.pluses++;
+        else if (vote == -1)
+            authorInfo.minuses++;
+        updateAll();
+        warn(vote);
+        voteUser(authorId, vote);
+    }
 }
 async function processStories(stories) {
     for (const story of stories) {
@@ -919,6 +1074,9 @@ function addSettingsOpenButton() {
 async function main() {
     await waitConfig;
     config.update(); // Just in case.
+    if (config.uuid !== '') {
+        delete GM_config.fields['registerRpm'];
+    }
     addCss(`.story__footer .story__rating-up {
   margin-right: 5px !important;
 }
@@ -1092,6 +1250,36 @@ async function main() {
   background: var(--color-primary-800);
   color: white;
   font-weight: bolder;
+}
+.rpm-user-rating-info {
+  padding: 0 10px;
+  border-radius: 5px;
+  display: inline-block;
+  background-color: var(--color-black-alpha-005);
+  margin-right: 10px;
+  user-select: none;
+  white-space: nowrap;
+}
+.rpm-user-rating-info-rating {
+  display: inline-block;
+  margin: 0 7px;
+  min-width: 10px;
+  text-align: center;
+}
+.rpm-user-rating-info span {
+  cursor: pointer;
+}
+.rpm-user-rating-info-pluses {
+  color: var(--color-primary-700);
+}
+.rpm-user-rating-info-minuses {
+  color: var(--color-danger-900);
+}
+article.story[rpm-author-own-vote="1"] .rpm-user-rating-info {
+  background-color: var(--color-primary-200)
+}
+article.story[rpm-author-own-vote="-1"] .rpm-user-rating-info {
+  background-color: var(--color-danger-200)
 }
 `);
     // process static posts
