@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.6.15
+// @version      0.7
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -215,12 +215,20 @@ var RPM;
         return response.secret;
     }
     RPM.register = register;
+    const infoCache = {};
     async function getUserInfo(id, user_uuid) {
+        if (id in infoCache) {
+            return infoCache[id];
+        }
         const response = (await post(DOMAIN + `user/${id}/info`, user_uuid !== '' ? { user_uuid } : {}));
+        infoCache[id] = response;
         return response;
     }
     RPM.getUserInfo = getUserInfo;
     function voteUser(id, vote, user_uuid) {
+        if (id in infoCache) {
+            delete infoCache[id];
+        }
         return post(DOMAIN + `user/${id}/vote`, { user_uuid, vote });
     }
     RPM.voteUser = voteUser;
@@ -241,7 +249,6 @@ const config = {
     summary: true,
     filteringPageRegex: "^https?:\\/\\/pikabu.ru\\/(|best|companies)$",
     blockPaidAuthors: false,
-    rpmMinRating: 0,
     ratingBar: false,
     ratingBarComments: false,
     minRatesCountToShowRatingBar: 10,
@@ -254,6 +261,8 @@ const config = {
     socialLinks: true,
     commentVideoDownloadButtons: true,
     showBlockAuthorForeverButton: true,
+    rpmEnabled: true,
+    rpmMinStoryRating: 0,
     uuid: "",
     option(key) {
         config[key] = GM_config.get(key).valueOf();
@@ -284,8 +293,9 @@ const config = {
         this.option("blockPaidAuthors");
         this.option("commentVideoDownloadButtons");
         this.option("socialLinks");
-        this.option("rpmMinRating");
         this.option("uuid");
+        this.option("rpmEnabled");
+        this.option("rpmMinStoryRating");
         enableFilters = new RegExp(config.filteringPageRegex).test(window.location.href);
     },
     formatMinuses(story) {
@@ -358,11 +368,6 @@ GM_config.init({
             default: config.blockPaidAuthors,
             label: "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
         },
-        rpmMinRating: {
-            type: "int",
-            default: config.rpmMinRating,
-            label: "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
-        },
         videoDownloadButtons: {
             type: "checkbox",
             label: "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
@@ -396,6 +401,35 @@ GM_config.init({
             type: "checkbox",
             default: config.commentVideoDownloadButtons,
             label: "Добавляет ко всем видео в комментариях ссылки на источники, если их возможно найти."
+        },
+        // НАСТРОЙКИ RPM
+        rpmEnabled: {
+            section: ["Настройки RPM", "Дополнительные функции скрипта. Используются сервера RPM."],
+            type: "checkbox",
+            default: config.rpmEnabled,
+            label: "Включить."
+        },
+        rpmMinStoryRating: {
+            type: "int",
+            default: config.rpmMinStoryRating,
+            label: "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
+        },
+        registerRpm: {
+            type: "button",
+            label: "Зарегистрироваться в системе RPM. После нажатия страница перезагрузится.",
+            async click() {
+                if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
+                    config.uuid = await RPM.register();
+                    GM_config.set('uuid', config.uuid);
+                    GM_config.save();
+                    sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
+                    await sleep(300);
+                    window.location.reload();
+                }
+                else {
+                    sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
+                }
+            }
         },
         // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
         filteringPageRegex: {
@@ -431,23 +465,6 @@ GM_config.init({
             //   "Ваш уникальный UUID в системе рейтинга RPM. Позволяет вам оценивать профили других пользователей.",
             default: config.uuid
         },
-        registerRpm: {
-            type: "button",
-            label: "Зарегистрироваться в системе RPM",
-            async click() {
-                if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
-                    config.uuid = await RPM.register();
-                    GM_config.set('uuid', config.uuid);
-                    GM_config.save();
-                    sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
-                    await sleep(300);
-                    window.location.reload();
-                }
-                else {
-                    sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
-                }
-            }
-        }
     },
     events: {
         init() {
@@ -852,8 +869,14 @@ async function processStory(story, processComments) {
     // videos
     if (config.videoDownloadButtons)
         processPostVideos(story, storyData);
-    processOldStory(story, storyData);
-    processRpm(story);
+    try {
+        processOldStory(story, storyData);
+    }
+    finally {
+        // Execute it if the previous call fails
+        if (config.rpmEnabled)
+            processRpm(story);
+    }
 }
 async function voteUser(id, vote) {
     if (vote === null)
@@ -871,7 +894,8 @@ async function processRpm(story) {
     // Prepare info
     const authorId = parseInt(story.getAttribute('data-author-id'));
     const userInfoRowElem = story.querySelector('.story__user-info');
-    if (userInfoRowElem === null)
+    const footerElem = story.querySelector('.story__footer-tools .story__comments-link.story__to-comments');
+    if (userInfoRowElem === null && footerElem === null)
         return;
     // Create elements
     const elem = document.createElement('div');
@@ -896,13 +920,16 @@ async function processRpm(story) {
         plusBtn.addEventListener('click', askAuth);
         minusBtn.addEventListener('click', askAuth);
     }
-    userInfoRowElem.prepend(elem);
+    if (userInfoRowElem)
+        userInfoRowElem.prepend(elem);
+    else
+        footerElem.parentElement.insertBefore(elem, footerElem);
     const authorInfo = await RPM.getUserInfo(authorId, config.uuid);
     // Delete the story if rating is less than required
     const rating = authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses;
-    if (rating < config.rpmMinRating && enableFilters) {
+    if (rating < config.rpmMinStoryRating && enableFilters) {
         story.remove();
-        info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinRating);
+        info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinStoryRating);
     }
     // Update counters
     updateOne(story);
@@ -1252,7 +1279,8 @@ async function main() {
   font-weight: bolder;
 }
 .rpm-user-rating-info {
-  padding: 0 10px;
+  font-size: 1.05em;
+  padding: 0.3em 0.6em;
   border-radius: 5px;
   display: inline-block;
   background-color: var(--color-black-alpha-005);
@@ -1260,20 +1288,21 @@ async function main() {
   user-select: none;
   white-space: nowrap;
 }
-.rpm-user-rating-info-rating {
+.rpm-user-rating-info span {
   display: inline-block;
-  margin: 0 7px;
-  min-width: 10px;
+  min-width: 1.5ch;
   text-align: center;
 }
-.rpm-user-rating-info span {
-  cursor: pointer;
+.rpm-user-rating-info-rating {
+  margin: 0 1ch;
 }
 .rpm-user-rating-info-pluses {
   color: var(--color-primary-700);
+  cursor: pointer;
 }
 .rpm-user-rating-info-minuses {
   color: var(--color-danger-900);
+  cursor: pointer;
 }
 article.story[rpm-author-own-vote="1"] .rpm-user-rating-info {
   background-color: var(--color-primary-200)
