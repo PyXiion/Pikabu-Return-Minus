@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7
+// @version      0.7.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -1043,6 +1043,30 @@ async function checkStoryLinks(
   }
 }
 
+function removeStory(storyElem: HTMLDivElement, reason: string) {
+  const titleElem = storyElem.querySelector('.story__title a') as HTMLAnchorElement;
+  if (titleElem === null)
+    return;
+
+  const title = titleElem.textContent;
+  const url = titleElem.href;
+
+  const placeholder = document.createElement('div');
+  placeholder.classList.add('rpm-placeholder');
+  
+  const urlElem = document.createElement('a');
+  urlElem.textContent = title;
+  urlElem.href = url;
+
+  const reasonElem = document.createElement('span');
+  reasonElem.classList.add('rpm-reason');
+  reasonElem.textContent = reason;
+
+  placeholder.append('Пост ', urlElem, ' удалён по причине: ', reasonElem, '.');
+
+  storyElem.replaceWith(placeholder);
+}
+
 function processOldStory(
   story: HTMLDivElement,
   storyData: Pikabu.CommentsData
@@ -1127,7 +1151,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     config.blockPaidAuthors &&
     story.querySelector(".user__label[data-type=\"pikabu-plus\"]") !== null
   ) {
-    story.remove()
+    removeStory(story, "подписка Пикабу+");
     info("Удалил пост", story, "как проплаченный:", `${config.blockPaidAuthors} = true`)
     return;
   }
@@ -1146,7 +1170,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     enableFilters &&
     storyData.story.rating < config.minStoryRating
   ) {
-    story.remove();
+    removeStory(story, "слишком низкий рейтинг поста");
     info("Удалил пост", story, "по фильтру рейтинга:", `storyData.story.rating < config.minStoryRating = ${storyData.story.rating} < ${config.minStoryRating} = true`)
     return;
   }
@@ -1224,7 +1248,7 @@ async function processRpm(story: HTMLDivElement) {
   // Delete the story if rating is less than required
   const rating = authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses;
   if (rating < config.rpmMinStoryRating && enableFilters) {
-    story.remove();
+    removeStory(story, 'слишком низкий PRM-рейтинг автора');
     info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinStoryRating);
   }
 
@@ -1652,7 +1676,14 @@ article.story[rpm-author-own-vote="1"] .rpm-user-rating-info {
 article.story[rpm-author-own-vote="-1"] .rpm-user-rating-info {
   background-color: var(--color-danger-200)
 }
-`);
+.rpm-placeholder {  
+  margin-top: 20px;
+  text-align: center;
+}
+.rpm-placeholder .rpm-reason {
+  display: block;
+  font-size: 1.2em;
+}`);
 
   // process static posts
   processStories(document.querySelectorAll("article.story"));
