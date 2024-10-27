@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.1
+// @version      0.7.2
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -296,39 +296,146 @@ namespace Pikabu {
 
 
 
-//#region RPM API
+//#region RPM API/Nodes
 
 namespace RPM {
-  const DOMAIN = 'https://rpm.pyxiion.ru/'
+  export namespace Service {
+    const DOMAIN = 'https://rpm.pyxiion.ru/'
 
-  export async function register() {
-    const response = (await post(DOMAIN + 'register', {})) as RpmJson.RegisterResponse;
-    return response.secret;
-  }
-
-  const infoCache: {[id: number]: RpmJson.InfoResponse} = {};
-
-  export async function getUserInfo(id: number, user_uuid: string): Promise<RpmJson.InfoResponse> {
-    if (id in infoCache) {
-      return infoCache[id];
+    export function isAuthorized() {
+      return config.uuid !== '';
     }
-    const response = (await post(DOMAIN + `user/${id}/info`, user_uuid !== '' ? {user_uuid} : {})) as RpmJson.InfoResponse;
-    infoCache[id] = response;
-    return response;
-  }
 
-  export function voteUser(id: number, vote: [-1, 0, 1], user_uuid: string) {
-    if (id in infoCache) {
-      delete infoCache[id];
+    export async function register() {
+      const response = (await post(DOMAIN + 'register', {})) as RpmJson.RegisterResponse;
+      return response.secret;
     }
-    return post(DOMAIN + `user/${id}/vote`, {user_uuid, vote} );
+
+    export async function getUserInfo(id: number): Promise<RpmJson.InfoResponse> {
+      const response = (await post(DOMAIN + `user/${id}/info`, isAuthorized() ? {user_uuid: config.uuid} : {})) as RpmJson.InfoResponse;
+      
+      if (response.own_vote) {
+        // Removes own vote from other votes
+        response.pluses -= response.own_vote === 1 ? 1 : 0;
+        response.minuses -= response.own_vote === -1 ? 1 : 0;
+      }
+
+      return response;
+    }
+
+    export function voteUser(id: number, vote: [-1, 0, 1]) {
+      if (!isAuthorized())
+        return null;
+      return post(DOMAIN + `user/${id}/vote`, {user_uuid: config.uuid, vote} );
+    }
+
+    async function post(url: string, json: Object): Promise<Object> {
+      const request = new HttpRequest(url);
+      request.setBody(json);
+      const response = await request.executeAsync();
+      return response.response;
+    }
   }
 
-  async function post(url: string, json: Object): Promise<Object> {
-    const request = new HttpRequest(url);
-    request.setBody(json);
-    const response = await request.executeAsync();
-    return response.response;
+  export namespace Nodes {
+
+    export function createUserRatingNode(uid: number, infoConsumer: (info: RpmJson.InfoResponse) => void = null) {
+      const elem = document.createElement('div');
+      elem.classList.add('rpm-user-rating', 'hint', `rpm-user-rating-${uid}`);
+
+      elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
+      elem.setAttribute('pikabu-user-id', uid.toString());
+
+      function addSpan(cls: string) {
+        const e = document.createElement('span');
+        e.className = cls;
+        elem.appendChild(e);
+
+        e.innerText = '0';
+
+        return e;
+      }
+
+      const plusElem = addSpan("rpm-pluses");
+      addSpan("rpm-rating");
+      const minusElem = addSpan("rpm-minuses");
+
+      if (Service.isAuthorized()) {
+        plusElem.addEventListener('click', () => UserRating.voteCallback(elem, uid, 1));
+        minusElem.addEventListener('click', () => UserRating.voteCallback(elem, uid, -1));
+      }
+
+      UserRating.updateUserRatingElemAsync(elem, infoConsumer);
+
+      return elem;
+    }
+
+    namespace UserRating {
+      const userCache: Map<number, RpmJson.InfoResponse> = new Map();
+
+      function updateUserRatingElem(elem: HTMLDivElement, info: RpmJson.InfoResponse) {
+        const pluses = info.pluses + (info.own_vote === 1 ? 1 : 0);
+        const minuses = info.minuses + (info.own_vote === -1 ? 1 : 0);
+        const rating = pluses - minuses + info.base_rating;
+  
+        if (info.own_vote !== undefined && info.own_vote !== null)
+          elem.setAttribute('rpm-own-vote', info.own_vote.toString());
+
+        (elem.querySelector('.rpm-pluses') as HTMLSpanElement).innerText = pluses.toString();
+        (elem.querySelector('.rpm-rating') as HTMLSpanElement).innerText = rating.toString();
+        (elem.querySelector('.rpm-minuses') as HTMLSpanElement).innerText = minuses.toString();
+      }
+
+      export async function updateUserRatingElemAsync(elem: HTMLDivElement, infoConsumer: (info: RpmJson.InfoResponse) => void = null) {
+        const uid = parseInt(elem.getAttribute('pikabu-user-id'));
+        let info = userCache.get(uid) ?? null;
+        
+        if (!info) {
+          info = await Service.getUserInfo(uid);
+          userCache.set(uid, info);
+        }
+        
+        if (infoConsumer)
+          infoConsumer(info);
+        updateUserRatingElem(elem, info);
+      }
+
+      async function voteUser(uid: number, vote: number) {
+        const info = userCache.get(uid);
+        info.own_vote = vote;
+
+        updateAll(uid, info);
+
+        const response = await Service.voteUser(uid, vote as any);
+      }
+
+      function updateAll(uid: number, info: RpmJson.InfoResponse) {
+        getAllElementsOfUser(uid).forEach(e => updateUserRatingElem(e, info));
+      }
+
+      function getAllElementsOfUser(uid: number) {
+        return document.querySelectorAll(`.rpm-user-rating-${uid}`) as NodeListOf<HTMLDivElement>;
+      }
+
+      export async function voteCallback(elem: HTMLDivElement, uid: number, btn: number) {
+        if (!Service.isAuthorized()) {
+          sendNotification('Ошибка', 'Чтобы проголосовать за автора, нужно зарегистрироваться в системе RPM. Вы можете сделать это в настройках.')
+          return;
+        }
+
+        const ownVote = parseInt(elem.getAttribute('rpm-own-vote') ?? '0');
+        let vote = ownVote;
+
+        if (ownVote === btn)
+          vote = 0;
+        else
+          vote += btn;
+
+        info(vote)
+        await voteUser(uid, vote);
+        // TODO: check response
+      }
+    }
   }
 }
 
@@ -370,6 +477,7 @@ const config = {
 
   rpmEnabled: true,
   rpmMinStoryRating: 0,
+  rpmComments: true,
   uuid: "",
 
   option(key: string) {
@@ -426,6 +534,7 @@ const config = {
 
     this.option("rpmEnabled");
     this.option("rpmMinStoryRating");
+    this.option("rpmComments");
 
     enableFilters = new RegExp(config.filteringPageRegex).test(
       window.location.href
@@ -563,7 +672,7 @@ GM_config.init({
       type: "checkbox",
       default: config.rpmEnabled,
       label:
-        "Включить."
+        "Включить для постов."
     },
     rpmMinStoryRating: {
       type: "int",
@@ -571,13 +680,19 @@ GM_config.init({
       label:
         "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
     },
+    rpmComments: {
+      type: "checkbox",
+      default: config.rpmEnabled,
+      label:
+        "Включить для комментариев."
+    },
     registerRpm: {
       type: "button",
       label:
         "Зарегистрироваться в системе RPM. После нажатия страница перезагрузится.",
       async click() {
         if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
-          config.uuid = await RPM.register();
+          config.uuid = await RPM.Service.register();
           GM_config.set('uuid', config.uuid);
           GM_config.save();
           sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
@@ -837,6 +952,9 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     }
     return;
   }
+  
+  if (config.rpmComments)
+    processCommentRpm(commentElem);
 
   const userElem = commentElem.querySelector(".comment__user");
   const ratingDown = commentElem.querySelector(".comment__rating-down");
@@ -1043,8 +1161,8 @@ async function checkStoryLinks(
   }
 }
 
-function removeStory(storyElem: HTMLDivElement, reason: string) {
-  const titleElem = storyElem.querySelector('.story__title a') as HTMLAnchorElement;
+function removeStory(storyElem: HTMLDivElement, reason: string, keepUser: boolean = false) {
+  const titleElem = storyElem.querySelector('.story__title a.story__title-link') as HTMLAnchorElement;
   if (titleElem === null)
     return;
 
@@ -1058,13 +1176,36 @@ function removeStory(storyElem: HTMLDivElement, reason: string) {
   urlElem.textContent = title;
   urlElem.href = url;
 
-  const reasonElem = document.createElement('span');
-  reasonElem.classList.add('rpm-reason');
-  reasonElem.textContent = reason;
+  const userInfo = storyElem.querySelector('.story__user-info');
+  if (keepUser && userInfo) {
+    const userInfoContainer = document.createElement('div');
+    userInfoContainer.append(userInfo.cloneNode(true));
+    userInfoContainer.classList.add('rpm-user-info-container')
 
-  placeholder.append('Пост ', urlElem, ' удалён по причине: ', reasonElem, '.');
+    // Update RPM ratings
+    for (const ratingElem of userInfoContainer.querySelectorAll('.rpm-user-rating')) {
+      const uid = parseInt(ratingElem.getAttribute('pikabu-user-id'));
+      ratingElem.replaceWith(RPM.Nodes.createUserRatingNode(uid));
+    }
 
-  storyElem.replaceWith(placeholder);
+    placeholder.append(urlElem, ` скрыт: ${reason}.`, userInfoContainer);
+  } else {
+    placeholder.append(urlElem, ` скрыт: ${reason}.`);
+  }
+
+  storyElem.parentElement.insertBefore(placeholder, storyElem);
+
+  const collapseButton = document.createElement('div');
+  collapseButton.classList.add("collapse-button", "collapse-button_active");
+  collapseButton.append(document.createElement('div'), document.createElement('div'));
+  collapseButton.addEventListener('click', () => {
+    if (collapseButton.classList.contains('collapse-button_active'))
+      collapseButton.classList.remove('collapse-button_active');
+    else
+      collapseButton.classList.add('collapse-button_active');
+  });
+
+  placeholder.prepend(collapseButton);
 }
 
 function processOldStory(
@@ -1151,7 +1292,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     config.blockPaidAuthors &&
     story.querySelector(".user__label[data-type=\"pikabu-plus\"]") !== null
   ) {
-    removeStory(story, "подписка Пикабу+");
+    removeStory(story, "подписка Пикабу+", true);
     info("Удалил пост", story, "как проплаченный:", `${config.blockPaidAuthors} = true`)
     return;
   }
@@ -1170,7 +1311,7 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     enableFilters &&
     storyData.story.rating < config.minStoryRating
   ) {
-    removeStory(story, "слишком низкий рейтинг поста");
+    removeStory(story, `рейтинг поста (${storyData.story.rating})`);
     info("Удалил пост", story, "по фильтру рейтинга:", `storyData.story.rating < config.minStoryRating = ${storyData.story.rating} < ${config.minStoryRating} = true`)
     return;
   }
@@ -1184,121 +1325,43 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   } finally {
     // Execute it if the previous call fails
     if (config.rpmEnabled)
-      processRpm(story);
+      processStoryRpm(story);
   }
 
 }
 
-async function voteUser(id: number, vote: number) {
-  if (vote === null) return;
-  if (config.uuid === undefined || config.uuid === null || config.uuid === '') {
-    sendNotification('Ошибка', 'Вы не авторизованы в RPM: ' + config.uuid);
-    return;
-  }
+async function processStoryRpm(story: HTMLDivElement) {
+  const uid = parseInt(story.getAttribute('data-author-id'));
 
-  const response = (await RPM.voteUser(id, vote as any, config.uuid)) as any;
-  if (!('result' in response) || response.result !== 'ok') {
-    sendNotification('Ошибка', JSON.stringify(response));
-  }
-}
-
-async function processRpm(story: HTMLDivElement) {
-  // Prepare info
-  const authorId = parseInt(story.getAttribute('data-author-id'));
-
-  const userInfoRowElem = story.querySelector('.story__user-info');
+  const userInfoRowElem = story.querySelector('.story__community_after-author-panel, .story__user-info');
   const footerElem = story.querySelector('.story__footer-tools .story__comments-link.story__to-comments');
-  if (userInfoRowElem === null && footerElem === null)
-    return;
 
-  // Create elements
-  const elem = document.createElement('div');
-  elem.classList.add('rpm-user-rating-info', 'hint');
-  elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
+  function ratingCallback(userInfo: RpmJson.InfoResponse) {
+    if (!enableFilters) return;
+    const rating = userInfo.base_rating + userInfo.pluses - userInfo.minuses + (userInfo.own_vote ?? 0);
 
-  function addSpan(cls: string) {
-    const e = document.createElement('span');
-    e.className = cls;
-    elem.appendChild(e);
-
-    return e;
+    if (rating < config.rpmMinStoryRating) {
+      removeStory(story, `RPM-рейтинг (${rating})`, true);
+    }
   }
 
-  const plusBtn = addSpan("rpm-user-rating-info-pluses");
-  addSpan("rpm-user-rating-info-rating");
-  const minusBtn = addSpan("rpm-user-rating-info-minuses");
-
-  // Make them clickable
-  if (config.uuid !== '') {
-    plusBtn.addEventListener('click',  () => vote(+1));
-    minusBtn.addEventListener('click', () => vote(-1));
-  } else {
-    const askAuth = () => sendNotification('Ошибка', 'Зайдите в настройки и зарегистрирутесь в системе RPM для голосования за авторов.');
-    plusBtn.addEventListener('click',  askAuth);
-    minusBtn.addEventListener('click', askAuth);
-  }
+  const elem = RPM.Nodes.createUserRatingNode(uid, ratingCallback);
 
   if (userInfoRowElem)
     userInfoRowElem.prepend(elem);
   else
     footerElem.parentElement.insertBefore(elem, footerElem);
+}
 
-  const authorInfo = await RPM.getUserInfo(authorId, config.uuid);
+async function processCommentRpm(comment: HTMLDivElement) {
+  const meta = comment.getAttribute('data-meta');
+  const uid = parseInt(meta.match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
 
-  // Delete the story if rating is less than required
-  const rating = authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses;
-  if (rating < config.rpmMinStoryRating && enableFilters) {
-    removeStory(story, 'слишком низкий PRM-рейтинг автора');
-    info('Пост от автора', authorId, 'был удалён, так как его рейтинг равен', rating, ', что меньше чем', config.rpmMinStoryRating);
-  }
+  const commentHeader = comment.querySelector('.comment__user');
+  info(comment, uid);
+  const elem = RPM.Nodes.createUserRatingNode(uid);
 
-  // Update counters
-  updateOne(story);
-
-  // Update counters of a story
-  function updateOne(story: HTMLDivElement) {
-    const plusBtn = story.querySelector(".rpm-user-rating-info-pluses") as HTMLSpanElement;
-    const ratingElem = story.querySelector(".rpm-user-rating-info-rating") as HTMLSpanElement;
-    const minusBtn = story.querySelector(".rpm-user-rating-info-minuses") as HTMLSpanElement;
-
-    plusBtn.innerText = authorInfo.pluses.toString();
-    ratingElem.innerText = (authorInfo.pluses + authorInfo.base_rating - authorInfo.minuses).toString();
-    minusBtn.innerText = authorInfo.minuses.toString();
-    story.setAttribute('rpm-author-own-vote', authorInfo.own_vote?.toString());
-  }
-
-  // Update all counters of the author
-  function updateAll() {
-    document.querySelectorAll(`article.story[data-author-id="${authorId}"]`).forEach(updateOne);
-  }
-
-  // Vote button callback
-  function vote(vote: number) {
-    const oldVote = authorInfo.own_vote ?? 0;
-    if (vote == authorInfo.own_vote) {
-      authorInfo.own_vote -= vote;
-      vote = 0;
-    } else {
-      vote += oldVote;
-      authorInfo.own_vote = vote;
-    }
-
-    if (oldVote == 1)
-      authorInfo.pluses--;
-    else if (oldVote == -1)
-      authorInfo.minuses--;
-
-    if (vote == 1)
-      authorInfo.pluses++;
-    else if (vote == -1)
-      authorInfo.minuses++;
-
-    updateAll();
-
-    warn(vote)
-    voteUser(authorId, vote);
-  }
-
+  commentHeader.append(elem);
 }
 
 async function processStories(stories: Iterable<HTMLDivElement>) {
@@ -1414,21 +1477,24 @@ function mutationsListener(
   observer: MutationObserver
 ) {
   for (const mutation of mutationList) {
-    for (const node of mutation.addedNodes) {
-      if (!(node instanceof HTMLElement)) continue;
-
-      if (node.matches(".comment__header")) {
-        const commentElem = node.closest(".comment") as HTMLDivElement;
-        info('Поймал голову комментария!', commentElem)
-        processCached(commentElem);
-      } else if (node.matches("article.story")) {
-        const storyElem = node as HTMLDivElement;
-        info('Поймал пост!', storyElem)
-        processStory(storyElem, false);
-      } else if (node.matches(".comment__more") && config.unrollCommentariesAutomatically) {
-        const button = node as HTMLButtonElement;
-        info('Поймал кнопку!', button)
-        unrollComments(button);
+    if (mutation.type === 'childList') {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.hasAttribute('rpm-observer-ignore')) continue;
+  
+        if (node.matches(".comment__header")) {
+          const commentElem = node.closest(".comment") as HTMLDivElement;
+          info('Поймал голову комментария!', commentElem)
+          processCached(commentElem);
+        } else if (node.matches("article.story")) {
+          const storyElem = node as HTMLDivElement;
+          info('Поймал пост!', storyElem)
+          processStory(storyElem, false);
+        } else if (node.matches(".comment__more") && config.unrollCommentariesAutomatically) {
+          const button = node as HTMLButtonElement;
+          info('Поймал кнопку!', button)
+          unrollComments(button);
+        }
       }
     }
   }
@@ -1460,6 +1526,11 @@ function addSettingsOpenButton() {
   });
 
   block.appendChild(button);
+}
+
+function init() {
+  window.addEventListener("load", onLoad);
+  main()
 }
 
 async function main() {
@@ -1644,58 +1715,84 @@ async function main() {
   color: white;
   font-weight: bolder;
 }
-.rpm-user-rating-info {
+.rpm-user-rating {
   font-size: 1.05em;
   padding: 0.3em 0.6em;
-  border-radius: 5px;
+  border-radius: 1rem;
   display: inline-block;
   background-color: var(--color-black-alpha-005);
-  margin-right: 10px;
   user-select: none;
   white-space: nowrap;
+  line-height: 1em;
 }
-.rpm-user-rating-info span {
+.story__main .rpm-user-rating, .rpm-placeholder .rpm-user-rating {
+  margin-right: 10px;
+}
+.comment__header .rpm-user-rating {
+  position: absolute;
+  right: 0;
+}
+.rpm-user-rating span {
   display: inline-block;
   min-width: 1.5ch;
   text-align: center;
 }
-.rpm-user-rating-info-rating {
+.rpm-user-rating .rpm-rating {
   margin: 0 1ch;
 }
-.rpm-user-rating-info-pluses {
+.rpm-user-rating .rpm-pluses {
   color: var(--color-primary-700);
   cursor: pointer;
 }
-.rpm-user-rating-info-minuses {
+.rpm-user-rating .rpm-minuses {
   color: var(--color-danger-900);
   cursor: pointer;
 }
-article.story[rpm-author-own-vote="1"] .rpm-user-rating-info {
+.rpm-user-rating[rpm-own-vote="1"] {
   background-color: var(--color-primary-200)
 }
-article.story[rpm-author-own-vote="-1"] .rpm-user-rating-info {
+.rpm-user-rating[rpm-own-vote="-1"] {
   background-color: var(--color-danger-200)
 }
-.rpm-placeholder {  
-  margin-top: 20px;
+.rpm-placeholder {
+  background-color: var(--color-bright-800);
+  border: 1px solid var(--color-black-430);
+  border-radius: 15px;
+  width: max-content;
+  height: max-content;
   text-align: center;
+  margin: 10px auto 0;
+  padding: 5px 20px;
+  position: relative;
 }
-.rpm-placeholder .rpm-reason {
-  display: block;
-  font-size: 1.2em;
+.rpm-placeholder .rpm-user-info-container {
+  width: max-content;
+  padding: 0.5em;
+  border-radius: 10px;
+  margin: 0 auto;
+}
+.rpm-placeholder .collapse-button {
+  position: absolute;
+  top: 0;
+  left: -70px;
+  translate: 0 -70%;
+}
+.rpm-placeholder:has(.collapse-button_active) + article {
+  display: none;
 }`);
+}
 
-  // process static posts
-  processStories(document.querySelectorAll("article.story"));
-
+async function onLoad() {
   observer = new MutationObserver(mutationsListener);
   observer.observe(document.querySelector(".app__content, .main__inner"), {
     childList: true,
     subtree: true,
   });
 
+  processStories(document.querySelectorAll("article.story"));
+
   if (!supportMenuCommands)
     addSettingsOpenButton();
 }
 
-window.addEventListener("load", main);
+init();
