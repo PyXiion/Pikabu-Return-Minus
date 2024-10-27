@@ -1,5 +1,3 @@
-declare function MD5(value: string): string;
-
 declare namespace PikabuJson
 {
   interface StoryDataElement {
