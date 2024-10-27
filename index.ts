@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.3
+// @version      0.7.4
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -1975,6 +1975,7 @@ async function main() {
   margin: 10px auto 0;
   padding: 5px 20px;
   position: relative;
+  max-width: 95%;
 }
 .rpm-placeholder .rpm-user-info-container {
   width: max-content;
@@ -1987,6 +1988,17 @@ async function main() {
   top: 0;
   left: -70px;
   translate: 0 -70%;
+}
+.mv .rpm-placeholder {
+  font-size: 0.825em;
+
+}
+.mv .rpm-placeholder .collapse-button {
+  display: inline flow-root list-item;
+  position: initial;
+  margin: 0 auto;
+  translate: 0 0;
+  transform: scale(0.75);
 }
 .rpm-placeholder:has(.collapse-button_active) + article {
   display: none;
