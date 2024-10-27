@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.2
+// @version      0.7.3
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -1225,10 +1225,10 @@ async function processStoryRpm(story) {
 async function processCommentRpm(comment) {
     const meta = comment.getAttribute('data-meta');
     const uid = parseInt(meta.match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
-    const commentHeader = comment.querySelector('.comment__user');
+    const commentHeader = comment.querySelector('.comment__header');
     info(comment, uid);
     const elem = RPM.Nodes.createUserRatingNode(uid);
-    commentHeader.append(elem);
+    commentHeader.insertBefore(elem, commentHeader.querySelector('.comment__right'));
 }
 async function processStories(stories) {
     for (const story of stories) {
@@ -1555,12 +1555,16 @@ async function main() {
   white-space: nowrap;
   line-height: 1em;
 }
-.story__main .rpm-user-rating, .rpm-placeholder .rpm-user-rating {
+.story__main .rpm-user-rating,
+.rpm-placeholder .rpm-user-rating {
   margin-right: 10px;
 }
 .comment__header .rpm-user-rating {
-  position: absolute;
+  margin-left:auto;
   right: 0;
+}
+.rpm-user-rating + .comment__right {
+  margin-left: unset;
 }
 .rpm-user-rating span {
   display: inline-block;
