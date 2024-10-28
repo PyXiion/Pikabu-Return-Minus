@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.4
+// @version      0.7.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -291,6 +291,11 @@ abstract class AbstractHttpRequest {
 class HttpRequest extends AbstractHttpRequest {
   protected body: any;
 
+  public constructor(url: string) {
+    super(url);
+    this.addHeader("Content-Type", "application/json");
+  }
+
   public setBody(body: any) {
     this.body = body;
   }
@@ -509,6 +514,9 @@ namespace RPM {
   export namespace Service {
     const DOMAIN = 'https://rpm.pyxiion.ru/'
 
+    const USER_REQUEST_QUEUE_PERIOD = 300;
+    const USER_REQUEST_QUEUE_AT_ONCE = 50;
+
     export function isAuthorized() {
       return config.uuid !== '';
     }
@@ -518,16 +526,79 @@ namespace RPM {
       return response.secret;
     }
 
-    export async function getUserInfo(id: number): Promise<RpmJson.InfoResponse> {
-      const response = (await post(DOMAIN + `user/${id}/info`, isAuthorized() ? {user_uuid: config.uuid} : {})) as RpmJson.InfoResponse;
-      
-      if (response.own_vote) {
-        // Removes own vote from other votes
-        response.pluses -= response.own_vote === 1 ? 1 : 0;
-        response.minuses -= response.own_vote === -1 ? 1 : 0;
+    interface UserInfoRequest {
+      callback: (info: RpmJson.UserInfo) => void;
+    }
+
+    const userInfoRequestQueue: Map<number, UserInfoRequest[]> = new Map();
+    let isQueueRunning = false;
+
+    export function getUserInfo(id: number): Promise<RpmJson.UserInfo> {
+      return new Promise((resolve) => {
+        if (!userInfoRequestQueue.has(id)) {
+          userInfoRequestQueue.set(id, [{ callback: resolve }]);
+        } else {
+          userInfoRequestQueue.get(id)!.push({ callback: resolve });
+        }
+    
+        setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+      });
+    }
+    
+
+    async function getBunchOfUserInfo(ids: number[]) {
+      const body: RpmJson.InfoBunchRequest = { ids }
+      if (config.uuid) body.user_uuid = config.uuid;
+
+      const response = (await post(DOMAIN + 'user/info_bunch', body)) as RpmJson.InfoBunchResponse;
+
+      const users = response.users;
+      for (const id in users) {
+        postprocessUserInfo(users[id]);
       }
 
-      return response;
+      return users;
+    }
+
+    async function workQueue() {
+      if (userInfoRequestQueue.size === 0 || isQueueRunning)
+        return;
+  
+      isQueueRunning = true;
+    
+      // Извлекаем до N уникальных запросов из очереди
+      const requestsToProcess = Array.from(userInfoRequestQueue.keys()).slice(0, USER_REQUEST_QUEUE_AT_ONCE);
+      const ids = requestsToProcess;
+    
+      try {
+        const usersInfo = await getBunchOfUserInfo(ids);
+    
+        // Вызываем все callback для каждого запроса
+        requestsToProcess.forEach(id => {
+          const userRequests = userInfoRequestQueue.get(id);
+          if (userRequests) {
+            const info = usersInfo[id] || null; // null если инфо не найдено
+            userRequests.forEach(req => req.callback(info));
+          }
+          userInfoRequestQueue.delete(id); // Удаляем обработанные запросы
+        });
+      } catch (error) {
+        console.error("Error processing user info requests:", error);
+      } finally {
+        isQueueRunning = false;
+      }
+    
+      // Повторный запуск, если есть еще запросы
+      setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+    }
+
+
+    function postprocessUserInfo(info: RpmJson.UserInfo) {
+      if (info.own_vote) {
+        // Removes own vote from other votes
+        info.pluses -= info.own_vote === 1 ? 1 : 0;
+        info.minuses -= info.own_vote === -1 ? 1 : 0;
+      }
     }
 
     export function voteUser(id: number, vote: [-1, 0, 1]) {
@@ -546,9 +617,9 @@ namespace RPM {
 
   export namespace Nodes {
 
-    export function createUserRatingNode(uid: number, infoConsumer: (info: RpmJson.InfoResponse) => void = null) {
+    export function createUserRatingNode(uid: number, infoConsumer: (info: RpmJson.UserInfo) => void = null) {
       const elem = document.createElement('div');
-      elem.classList.add('rpm-user-rating', 'hint', `rpm-user-rating-${uid}`);
+      elem.classList.add('rpm-user-rating', 'hint', 'rpm-not-ready', `rpm-user-rating-${uid}`);
 
       elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
       elem.setAttribute('pikabu-user-id', uid.toString());
@@ -563,6 +634,10 @@ namespace RPM {
         return e;
       }
 
+      const loadingIcon = document.createElement('div');
+      loadingIcon.classList.add('rpm-loading');
+      elem.appendChild(loadingIcon);
+      
       const plusElem = addSpan("rpm-pluses");
       addSpan("rpm-rating");
       const minusElem = addSpan("rpm-minuses");
@@ -578,9 +653,9 @@ namespace RPM {
     }
 
     namespace UserRating {
-      const userCache: Map<number, RpmJson.InfoResponse> = new Map();
+      const userCache: Map<number, RpmJson.UserInfo> = new Map();
 
-      function updateUserRatingElem(elem: HTMLDivElement, info: RpmJson.InfoResponse) {
+      function updateUserRatingElem(elem: HTMLDivElement, info: RpmJson.UserInfo) {
         const pluses = info.pluses + (info.own_vote === 1 ? 1 : 0);
         const minuses = info.minuses + (info.own_vote === -1 ? 1 : 0);
         const rating = pluses - minuses + info.base_rating;
@@ -588,12 +663,15 @@ namespace RPM {
         if (info.own_vote !== undefined && info.own_vote !== null)
           elem.setAttribute('rpm-own-vote', info.own_vote.toString());
 
+
         (elem.querySelector('.rpm-pluses') as HTMLSpanElement).innerText = pluses.toString();
         (elem.querySelector('.rpm-rating') as HTMLSpanElement).innerText = rating.toString();
         (elem.querySelector('.rpm-minuses') as HTMLSpanElement).innerText = minuses.toString();
+
+        elem.classList.remove('rpm-not-ready');
       }
 
-      export async function updateUserRatingElemAsync(elem: HTMLDivElement, infoConsumer: (info: RpmJson.InfoResponse) => void = null) {
+      export async function updateUserRatingElemAsync(elem: HTMLDivElement, infoConsumer: (info: RpmJson.UserInfo) => void = null) {
         const uid = parseInt(elem.getAttribute('pikabu-user-id'));
         let info = userCache.get(uid) ?? null;
         
@@ -616,7 +694,7 @@ namespace RPM {
         const response = await Service.voteUser(uid, vote as any);
       }
 
-      function updateAll(uid: number, info: RpmJson.InfoResponse) {
+      function updateAll(uid: number, info: RpmJson.UserInfo) {
         getAllElementsOfUser(uid).forEach(e => updateUserRatingElem(e, info));
       }
 
@@ -1543,7 +1621,7 @@ async function processStoryRpm(story: HTMLDivElement) {
   const userInfoRowElem = story.querySelector('.story__community_after-author-panel, .story__user-info');
   const footerElem = story.querySelector('.story__footer-tools .story__comments-link.story__to-comments');
 
-  function ratingCallback(userInfo: RpmJson.InfoResponse) {
+  function ratingCallback(userInfo: RpmJson.UserInfo) {
     if (!enableFilters) return;
     const rating = userInfo.base_rating + userInfo.pluses - userInfo.minuses + (userInfo.own_vote ?? 0);
 
@@ -1560,9 +1638,19 @@ async function processStoryRpm(story: HTMLDivElement) {
     footerElem.parentElement.insertBefore(elem, footerElem);
 }
 
-async function processCommentRpm(comment: HTMLDivElement) {
-  const meta = comment.getAttribute('data-meta');
-  const uid = parseInt(meta.match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
+function getCommentAuthorId(comment: HTMLDivElement) {
+  if (comment.hasAttribute('data-author-id')) {
+    return parseInt(comment.getAttribute('data-author-id'));
+  }
+  if (comment.hasAttribute('data-meta')) {
+    return parseInt(comment.getAttribute('data-meta').match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
+  }
+  return null;
+}
+
+function processCommentRpm(comment: HTMLDivElement) {
+  const uid = getCommentAuthorId(comment);
+  if (!uid) return;
 
   const commentHeader = comment.querySelector('.comment__header');
   info(comment, uid);
@@ -1991,7 +2079,6 @@ async function main() {
 }
 .mv .rpm-placeholder {
   font-size: 0.825em;
-
 }
 .mv .rpm-placeholder .collapse-button {
   display: inline flow-root list-item;
@@ -2002,6 +2089,23 @@ async function main() {
 }
 .rpm-placeholder:has(.collapse-button_active) + article {
   display: none;
+}
+
+.rpm-loading {
+  display: none;
+  min-width: 4px;
+  min-height: 4px;
+  
+  border: 7px solid var(--color-primary-400);
+  border-top: 7px solid var(--color-primary-700);
+  border-radius: 50%;
+  animation: spin 1.5s linear infinite;
+}
+.rpm-not-ready * {
+  display: none !important;
+}
+.rpm-not-ready .rpm-loading {
+  display: block !important;
 }`);
 }
 

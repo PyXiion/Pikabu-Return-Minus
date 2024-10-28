@@ -150,11 +150,20 @@ declare namespace RpmJson {
 
   interface InfoRequest extends AuthOptional {}
 
-  interface InfoResponse {
+  interface UserInfo {
     pluses: number;
     minuses: number;
     base_rating: number;
     own_vote?: number;
+  }
+
+  interface InfoBunchRequest {
+    ids: number[];
+    user_uuid?: string;
+  }
+
+  interface InfoBunchResponse {
+    users: {[id: number]: UserInfo}
   }
 }
 

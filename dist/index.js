@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.4
+// @version      0.7.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -251,6 +251,10 @@ class AbstractHttpRequest {
     }
 }
 class HttpRequest extends AbstractHttpRequest {
+    constructor(url) {
+        super(url);
+        this.addHeader("Content-Type", "application/json");
+    }
     setBody(body) {
         this.body = body;
     }
@@ -405,6 +409,8 @@ var RPM;
     let Service;
     (function (Service) {
         const DOMAIN = 'https://rpm.pyxiion.ru/';
+        const USER_REQUEST_QUEUE_PERIOD = 300;
+        const USER_REQUEST_QUEUE_AT_ONCE = 50;
         function isAuthorized() {
             return config.uuid !== '';
         }
@@ -414,16 +420,66 @@ var RPM;
             return response.secret;
         }
         Service.register = register;
-        async function getUserInfo(id) {
-            const response = (await post(DOMAIN + `user/${id}/info`, isAuthorized() ? { user_uuid: config.uuid } : {}));
-            if (response.own_vote) {
-                // Removes own vote from other votes
-                response.pluses -= response.own_vote === 1 ? 1 : 0;
-                response.minuses -= response.own_vote === -1 ? 1 : 0;
-            }
-            return response;
+        const userInfoRequestQueue = new Map();
+        let isQueueRunning = false;
+        function getUserInfo(id) {
+            return new Promise((resolve) => {
+                if (!userInfoRequestQueue.has(id)) {
+                    userInfoRequestQueue.set(id, [{ callback: resolve }]);
+                }
+                else {
+                    userInfoRequestQueue.get(id).push({ callback: resolve });
+                }
+                setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+            });
         }
         Service.getUserInfo = getUserInfo;
+        async function getBunchOfUserInfo(ids) {
+            const body = { ids };
+            if (config.uuid)
+                body.user_uuid = config.uuid;
+            const response = (await post(DOMAIN + 'user/info_bunch', body));
+            const users = response.users;
+            for (const id in users) {
+                postprocessUserInfo(users[id]);
+            }
+            return users;
+        }
+        async function workQueue() {
+            if (userInfoRequestQueue.size === 0 || isQueueRunning)
+                return;
+            isQueueRunning = true;
+            // Извлекаем до N уникальных запросов из очереди
+            const requestsToProcess = Array.from(userInfoRequestQueue.keys()).slice(0, USER_REQUEST_QUEUE_AT_ONCE);
+            const ids = requestsToProcess;
+            try {
+                const usersInfo = await getBunchOfUserInfo(ids);
+                // Вызываем все callback для каждого запроса
+                requestsToProcess.forEach(id => {
+                    const userRequests = userInfoRequestQueue.get(id);
+                    if (userRequests) {
+                        const info = usersInfo[id] || null; // null если инфо не найдено
+                        userRequests.forEach(req => req.callback(info));
+                    }
+                    userInfoRequestQueue.delete(id); // Удаляем обработанные запросы
+                });
+            }
+            catch (error) {
+                console.error("Error processing user info requests:", error);
+            }
+            finally {
+                isQueueRunning = false;
+            }
+            // Повторный запуск, если есть еще запросы
+            setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+        }
+        function postprocessUserInfo(info) {
+            if (info.own_vote) {
+                // Removes own vote from other votes
+                info.pluses -= info.own_vote === 1 ? 1 : 0;
+                info.minuses -= info.own_vote === -1 ? 1 : 0;
+            }
+        }
         function voteUser(id, vote) {
             if (!isAuthorized())
                 return null;
@@ -441,7 +497,7 @@ var RPM;
     (function (Nodes) {
         function createUserRatingNode(uid, infoConsumer = null) {
             const elem = document.createElement('div');
-            elem.classList.add('rpm-user-rating', 'hint', `rpm-user-rating-${uid}`);
+            elem.classList.add('rpm-user-rating', 'hint', 'rpm-not-ready', `rpm-user-rating-${uid}`);
             elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
             elem.setAttribute('pikabu-user-id', uid.toString());
             function addSpan(cls) {
@@ -451,6 +507,9 @@ var RPM;
                 e.innerText = '0';
                 return e;
             }
+            const loadingIcon = document.createElement('div');
+            loadingIcon.classList.add('rpm-loading');
+            elem.appendChild(loadingIcon);
             const plusElem = addSpan("rpm-pluses");
             addSpan("rpm-rating");
             const minusElem = addSpan("rpm-minuses");
@@ -474,6 +533,7 @@ var RPM;
                 elem.querySelector('.rpm-pluses').innerText = pluses.toString();
                 elem.querySelector('.rpm-rating').innerText = rating.toString();
                 elem.querySelector('.rpm-minuses').innerText = minuses.toString();
+                elem.classList.remove('rpm-not-ready');
             }
             async function updateUserRatingElemAsync(elem, infoConsumer = null) {
                 const uid = parseInt(elem.getAttribute('pikabu-user-id'));
@@ -1222,9 +1282,19 @@ async function processStoryRpm(story) {
     else
         footerElem.parentElement.insertBefore(elem, footerElem);
 }
-async function processCommentRpm(comment) {
-    const meta = comment.getAttribute('data-meta');
-    const uid = parseInt(meta.match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
+function getCommentAuthorId(comment) {
+    if (comment.hasAttribute('data-author-id')) {
+        return parseInt(comment.getAttribute('data-author-id'));
+    }
+    if (comment.hasAttribute('data-meta')) {
+        return parseInt(comment.getAttribute('data-meta').match(/(?:^|;)aid=(\d+)(?:;|$)/)[1]);
+    }
+    return null;
+}
+function processCommentRpm(comment) {
+    const uid = getCommentAuthorId(comment);
+    if (!uid)
+        return;
     const commentHeader = comment.querySelector('.comment__header');
     info(comment, uid);
     const elem = RPM.Nodes.createUserRatingNode(uid);
@@ -1614,7 +1684,6 @@ async function main() {
 }
 .mv .rpm-placeholder {
   font-size: 0.825em;
-
 }
 .mv .rpm-placeholder .collapse-button {
   display: inline flow-root list-item;
@@ -1625,6 +1694,23 @@ async function main() {
 }
 .rpm-placeholder:has(.collapse-button_active) + article {
   display: none;
+}
+
+.rpm-loading {
+  display: none;
+  min-width: 4px;
+  min-height: 4px;
+  
+  border: 7px solid var(--color-primary-400);
+  border-top: 7px solid var(--color-primary-700);
+  border-radius: 50%;
+  animation: spin 1.5s linear infinite;
+}
+.rpm-not-ready * {
+  display: none !important;
+}
+.rpm-not-ready .rpm-loading {
+  display: block !important;
 }`);
 }
 async function onLoad() {
