@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.5
+// @version      0.7.6
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -537,6 +537,8 @@ var RPM;
             }
             async function updateUserRatingElemAsync(elem, infoConsumer = null) {
                 const uid = parseInt(elem.getAttribute('pikabu-user-id'));
+                if (uid === null || uid === undefined || Number.isNaN(uid))
+                    return;
                 let info = userCache.get(uid) ?? null;
                 if (!info) {
                     info = await Service.getUserInfo(uid);
