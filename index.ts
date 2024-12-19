@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.7.6
+// @version      0.8
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -15,7 +15,6 @@
 // @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @license      MIT
 // ==/UserScript==
-
 
 //#region Utils
 
@@ -283,7 +282,7 @@ abstract class AbstractHttpRequest {
         onSuccess: resolve,
       });
     });
-    promise.catch(console.error);
+    promise.catch(error);
     return promise;
   }
 }
@@ -291,9 +290,10 @@ abstract class AbstractHttpRequest {
 class HttpRequest extends AbstractHttpRequest {
   protected body: any;
 
-  public constructor(url: string) {
+  public constructor(url: string, method: HttpMethod = "GET") {
     super(url);
     this.addHeader("Content-Type", "application/json");
+    this.httpMethod = method;
   }
 
   public setBody(body: any) {
@@ -497,7 +497,7 @@ namespace Pikabu {
 
         return commentsData;
       } catch (error) {
-        console.error(error);
+        error(error);
         return null;
       }
     }
@@ -513,17 +513,24 @@ namespace Pikabu {
 namespace RPM {
   export namespace Service {
     const DOMAIN = 'https://rpm.pyxiion.ru/'
+    // const DOMAIN = 'http://localhost:8000/'
 
     const USER_REQUEST_QUEUE_PERIOD = 300;
+    let PERIOD_MULTIPLIER = 1;
     const USER_REQUEST_QUEUE_AT_ONCE = 50;
 
     export function isAuthorized() {
-      return config.uuid !== '';
+      return GM_config.get('uuid') !== '';
     }
 
     export async function register() {
       const response = (await post(DOMAIN + 'register', {})) as RpmJson.RegisterResponse;
       return response.secret;
+    }
+
+    export async function getFeedbacks() {
+      const response = (await get(DOMAIN + 'meta/feedback')) as RpmJson.MetaFeedbackResponse;
+      return response;
     }
 
     interface UserInfoRequest {
@@ -541,14 +548,15 @@ namespace RPM {
           userInfoRequestQueue.get(id)!.push({ callback: resolve });
         }
     
-        setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+        workQueue(USER_REQUEST_QUEUE_PERIOD * PERIOD_MULTIPLIER);
       });
     }
     
 
     async function getBunchOfUserInfo(ids: number[]) {
       const body: RpmJson.InfoBunchRequest = { ids }
-      if (config.uuid) body.user_uuid = config.uuid;
+      const uuid = GM_config.get('uuid') as string;
+      if (uuid) body.user_uuid = uuid;
 
       const response = (await post(DOMAIN + 'user/info_bunch', body)) as RpmJson.InfoBunchResponse;
 
@@ -560,11 +568,12 @@ namespace RPM {
       return users;
     }
 
-    async function workQueue() {
+    async function workQueue(sleepTime: number = 0) {
       if (userInfoRequestQueue.size === 0 || isQueueRunning)
         return;
-  
       isQueueRunning = true;
+
+      await sleep(sleepTime);
     
       // Извлекаем до N уникальных запросов из очереди
       const requestsToProcess = Array.from(userInfoRequestQueue.keys()).slice(0, USER_REQUEST_QUEUE_AT_ONCE);
@@ -583,13 +592,14 @@ namespace RPM {
           userInfoRequestQueue.delete(id); // Удаляем обработанные запросы
         });
       } catch (error) {
-        console.error("Error processing user info requests:", error);
+        error("Error processing user info requests:", error);
+        PERIOD_MULTIPLIER += 1;
       } finally {
         isQueueRunning = false;
       }
     
       // Повторный запуск, если есть еще запросы
-      setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD);
+      setTimeout(workQueue, USER_REQUEST_QUEUE_PERIOD * PERIOD_MULTIPLIER);
     }
 
 
@@ -604,12 +614,18 @@ namespace RPM {
     export function voteUser(id: number, vote: [-1, 0, 1]) {
       if (!isAuthorized())
         return null;
-      return post(DOMAIN + `user/${id}/vote`, {user_uuid: config.uuid, vote} );
+      return post(DOMAIN + `user/${id}/vote`, {user_uuid: GM_config.get('uuid'), vote} );
     }
 
     async function post(url: string, json: Object): Promise<Object> {
-      const request = new HttpRequest(url);
+      const request = new HttpRequest(url, "POST");
       request.setBody(json);
+      const response = await request.executeAsync();
+      return response.response;
+    }
+
+    async function get(url: string): Promise<Object> {
+      const request = new HttpRequest(url, "GET");
       const response = await request.executeAsync();
       return response.response;
     }
@@ -645,6 +661,10 @@ namespace RPM {
       if (Service.isAuthorized()) {
         plusElem.addEventListener('click', () => UserRating.voteCallback(elem, uid, 1));
         minusElem.addEventListener('click', () => UserRating.voteCallback(elem, uid, -1));
+      } else {
+        const msgCallback = () => sendNotification('Ошибка', 'Авторизируйтесь в системе RPM в настройках скрипта, чтобы голосовать за авторов.');
+        plusElem.addEventListener('click', msgCallback);
+        minusElem.addEventListener('click', msgCallback);
       }
 
       UserRating.updateUserRatingElemAsync(elem, infoConsumer);
@@ -729,362 +749,389 @@ namespace RPM {
 
 //#endregion
 
+class Deferred<T> {
+  public promise: Promise<T>;
+  reject: (reason?: any) => void;
+  resolve: (value: T | PromiseLike<T>) => void;
+
+  constructor() {
+    this.promise = new Promise<T>((resolve, reject)=> {
+      this.reject = reject
+      this.resolve = resolve
+    })
+  }
+}
+function waitForElement(selector, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    const checkExistence = () => {
+      const element = document.querySelector(selector);
+      if (element) {
+        resolve(element);
+      } else if (Date.now() - startTime >= timeout) {
+        reject(new Error(`Element with selector "${selector}" not found within ${timeout}ms`));
+      } else {
+        setTimeout(checkExistence, 100);
+      }
+  };
+
+    checkExistence();
+  });
+}
+
 
 let enableFilters = null;
 
 const isStoryPage = window.location.href.includes("/story/");
 const currentStoryId = parseInt(["0", ...window.location.href.split('_')].pop());
 
-const config = {
-  debug: false,
+function makeEval(args: string, str: string, defaultFunc: Function) {
+  try {
+    return new Function(args, "return " + str);
+  } catch {
+    return defaultFunc;
+  }
+}
 
-  minStoryRating: 100,
-  summary: true,
+class Formats {
+  formatOwnComment: CallableFunction;
+  formatCommentMinuses: CallableFunction;
+  formatStoryMinuses: CallableFunction;
+}
 
-  filteringPageRegex: "^https?:\\/\\/pikabu.ru\\/(|best|companies)$",
-  blockPaidAuthors: false,
+namespace SettingEnums {
+  export enum UnrollComments {
+    NONE = 'Стандартная пикабушная кнопка',
+    UNROLL_ALL_BUTTON = 'Дополнительная кнопка "Раскрыть всё"',
+    AUTO_UNROLL = 'Автоматическая раскрутка всех комментариев'
+  }
+}
 
-  ratingBar: false,
-  ratingBarComments: false,
-  minRatesCountToShowRatingBar: 10,
-
-  minusesPattern: null,
-  minusesCommentPattern: null,
-
-  ownCommentPattern: null,
-  allCommentsLoadedNotification: false,
-
-  unrollCommentariesAutomatically: false,
-
-  videoDownloadButtons: true,
-  socialLinks: true,
-
-  commentVideoDownloadButtons: true,
-
-  showBlockAuthorForeverButton: true,
-
-  rpmEnabled: true,
-  rpmMinStoryRating: 0,
-  rpmComments: true,
-  uuid: "",
-
-  option(key: string) {
-    config[key] = GM_config.get(key).valueOf();
-  },
-  update() {
-    this.option("debug");
-    this.option("minStoryRating")
-    this.option("summary");
-    this.option("filteringPageRegex")
-    this.option("ratingBar");
-    this.option("ratingBarComments");
-    this.option("minRatesCountToShowRatingBar")
-
-    function makeEval(args: string, str: string, defaultFunc: Function) {
-      try {
-        return new Function(args, "return " + str);
-      } catch {
-        return defaultFunc;
-      }
-    }
-
-    config.minusesPattern = makeEval(
-      "story",
-      (GM_config.get("minusesPattern").valueOf() as string).replace(
-        "%d",
-        "story.minuses"
-      ),
-      (story: any) => story.minuses,
-    );
-    config.minusesCommentPattern = makeEval(
-      "comment",
-      (GM_config.get("minusesCommentPattern").valueOf() as string).replace(
-        "%d",
-        "comment.minuses"
-      ),
-      (comment: any) => comment.minuses,
-    );
-    config.ownCommentPattern = makeEval(
-      "comment",
-      GM_config.get("ownCommentPattern").valueOf() as string,
-      (comment: any) => (comment.pluses == 0 && comment.minuses == 0) ? 0 : `${comment.pluses}/${comment.minuses}`,
-    );
-
-    this.option("unrollCommentariesAutomatically");
-    this.option("videoDownloadButtons");
-    this.option("showBlockAuthorForeverButton");
-    this.option("allCommentsLoadedNotification");
-    this.option("blockPaidAuthors");
-    this.option("commentVideoDownloadButtons");
-
-    this.option("socialLinks");
-    this.option("uuid");
-
-    this.option("rpmEnabled");
-    this.option("rpmMinStoryRating");
-    this.option("rpmComments");
-
-    enableFilters = new RegExp(config.filteringPageRegex).test(
-      window.location.href
-    );
-  },
-
-  formatMinuses(story): string {
-    return config.minusesPattern(story).toString();
-  },
-  formatCommentMinuses(comment): string {
-    return config.minusesCommentPattern(comment).toString();
-  },
-  formatOwnRating(comment): string {
-    return config.ownCommentPattern(comment).toString();
-  },
-};
+const formats = new Formats()
 
 let isConfigInit = false;
-GM_config.init({
-  id: "prm",
-  title: (() => {
-    const div = document.createElement('div');
+let frame = document.createElement('div');
+document.body.appendChild(frame);
 
-    const p1 = document.createElement('p');
-    p1.textContent = "Return Pikabu minus";
 
-    const links: HTMLAnchorElement[] = [];
+async function handleOldConfigFields() {
+  const config = JSON.parse(await GM.getValue('prm', '{}'));
 
-    function addLink(text: string, url: string) {
-      const link = document.createElement('a');
-      link.href = url;
-      link.textContent = text;
-      links.push(link);
+  let changed = false;
+
+  if ('unrollCommentariesAutomatically' in config) {
+    if (config.unrollCommentariesAutomatically) {
+      config['unrollCommentatries'] = SettingEnums.UnrollComments.AUTO_UNROLL;
     }
+    delete config.unrollCommentariesAutomatically;
+  }
 
-    addLink("Телеграм", "https://t.me/return_pikabu");
-    addLink("GitHub", "https://github.com/PyXiion/Pikabu-Return-Minus");
+  if (changed)
+    await GM.setValue('prm', JSON.stringify(config));
+}
 
-    div.append(p1, ...links);
+async function handleConfig() {
+  await handleOldConfigFields();
 
-    return div;
-  })(),
-  fields: {
-    // ОБЩИЕ НАСТРОЙКИ
-    summary: {
-      section: [
-        "Общие настройки", 
-      ],
-      type: "checkbox",
-      default: config.summary,
-      label: "Отображение суммарного рейтинга у постов и комментариев.",
+  GM_config.init({
+    id: "prm",
+    title: (() => {
+      const div = document.createElement('div');
+  
+      const p1 = document.createElement('p');
+      p1.textContent = "Return Pikabu minus";
+  
+      const links: HTMLAnchorElement[] = [];
+  
+      function addLink(text: string, url: string) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.textContent = text;
+        links.push(link);
+      }
+  
+      addLink("Телеграм", "https://t.me/return_pikabu");
+      addLink("GitHub", "https://github.com/PyXiion/Pikabu-Return-Minus");
+  
+      div.append(p1, ...links);
+  
+      return div;
+    })(),
+    fields: {
+      // ОБЩИЕ НАСТРОЙКИ
+      summary: {
+        section: [
+          "Общие настройки", 
+        ],
+        type: "checkbox",
+        default: true,
+        label: "Отображение суммарного рейтинга у постов и комментариев.",
+      },
+      minRatesCountToShowRatingBar: {
+        type: "int",
+        default: 3,
+        label:
+          "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. " +
+          "Установите на 0, чтобы всегда показывать.",
+      },
+  
+      // НАСТРОЙКИ ПОСТОВ
+      minStoryRating: {
+        section: [
+          "Настройки постов", 
+        ],
+        type: "int",
+        default: 100,
+        label: "Посты с рейтингом ниже указанного будут удаляться из ленты. Вы сможете увидеть удалённые посты в списке просмотренных.",
+      },
+      ratingBar: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Отображение соотношения плюсов и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.",
+      },
+      showBlockAuthorForeverButton: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. " + 
+          "Вы должны быть авторизированы на сайте, иначе кнопка работать не будет.",
+      },
+      blockPaidAuthors: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
+      },
+  
+  
+      videoDownloadButtons: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
+      },
+      socialLinks: {
+        type: "checkbox",
+        default: false,
+        label:
+          "Добавляет в начале заголовка поста значки Телеграма, ВК, Тиктока, если в посте есть соответствующие ссылки.",
+      },
+   
+      // НАСТРОЙКИ КОММЕНТАРИЕВ
+      ratingBarComments: {
+        section: [
+          "Настройки комментариев", 
+        ],
+        type: "checkbox",
+        default: true,
+        label: "Отображение соотношения плюсов и минусов у комментариев.",
+      },
+      allCommentsLoadedNotification: {
+        type: "checkbox",
+        default: false,
+        label:
+          "Показывать уведомление о загрузке всех комментариев под постом."
+      },
+      commentVideoDownloadButtons: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Добавляет ко всем видео в комментариях ссылки на источники, если их возможно найти."
+      },
+      unrollCommentariesAutomatically: { // DEPRECATED
+        type: "hidden",
+        default: undefined
+      },
+      unrollCommentaries: {
+        type: 'select',
+        label: 'Раскрутка комментариев.',
+        options: [
+          SettingEnums.UnrollComments.NONE,
+          SettingEnums.UnrollComments.UNROLL_ALL_BUTTON,
+          SettingEnums.UnrollComments.AUTO_UNROLL
+        ],
+        default: SettingEnums.UnrollComments.NONE
+      },
+  
+      // ВКЛАДКИ ПИКАБ
+      hotTab: {
+        section: [
+          "Вкладки Пикабу",
+          "Включает/выключает вкладки сверху. Работает только на ПК"
+        ],
+        type: "checkbox",
+        default: true,
+        label: "Горячее",
+      },
+      bestTab: {
+        type: "checkbox",
+        default: true,
+        label: "Лучшее",
+      },
+      newTab: {
+        type: "checkbox",
+        default: true,
+        label: "Свежее",
+      },
+      subsTab: {
+        type: "checkbox",
+        default: true,
+        label: "Подписки",
+      },
+      communitiesTab: {
+        type: "checkbox",
+        default: true,
+        label: "Сообщества",
+      },
+      blogsTab: {
+        type: "checkbox",
+        default: true,
+        label: "Блоги",
+      },
+      expertsTab: {
+        type: "checkbox",
+        default: true,
+        label: "Эксперты",
+      },
+  
+      // НАСТРОЙКИ RPM
+      rpmEnabled: {
+        section: ["Настройки RPM", "Дополнительные функции скрипта. Используется сервер rpm.pyxiion.ru"],
+        type: "checkbox",
+        default: true,
+        label:
+          "Включить для постов."
+      },
+      rpmMinStoryRating: {
+        type: "int",
+        default: 0,
+        label:
+          "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
+      },
+      rpmIgnoreDownvoted: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Скрытие постов с вашим минусом в системе RPM. Типа игнор-листа."
+      },
+      rpmComments: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Включить для комментариев."
+      },
+      registerRpm: {
+        type: "button",
+        label:
+          "Зарегистрироваться в системе RPM. После нажатия страница перезагрузится.",
+        async click() {
+          const uuid = GM_config.get('uuid');
+          if (uuid === null || uuid === undefined || uuid === '') {
+            GM_config.set('uuid', await RPM.Service.register())
+            GM_config.save();
+            sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
+            
+            await sleep(300);
+            window.location.reload();
+          } else {
+            sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
+          }
+        }
+      },
+  
+      // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
+      filteringPageRegex: {
+        section: ["Продвинутые настройки"],
+        type: "text",
+        label:
+          "Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).",
+        default: "^https?:\\/\\/pikabu.ru\\/(|best|companies|browse|disputed|most-saved)$",
+      },
+  
+      minusesPattern: {
+        type: "text",
+        default: "story.minuses",
+        label:
+          "Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Внутри может выполняться любой код, поэтому используйте с осторожностью.\n" +
+          "Шаблоны гарантированно работают только на Tampermonkey.",
+      },
+      minusesCommentPattern: {
+        type: "text",
+        default: "comment.minuses",
+        label:
+          "Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
+      },
+      ownCommentPattern: {
+        type: "text",
+        default:
+          "comment.pluses == 0 && comment.minuses == 0 ? 0 : comment.pluses == comment.minuses ? `+${comment.pluses} / -${comment.minuses}` : comment.pluses == 0 ? `-${comment.minuses}` : comment.minuses == 0 ? `+${comment.pluses}` : `+${comment.pluses} / ${comment.rating} / -${comment.minuses}`",
+        label:
+          "Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
+      },
+  
+      analytics: {
+        type: "checkbox",
+        label:
+          "Отправка всякой информации на сервера RPM, если включено. Пока что никакой информации не собирается, но вы можете выключить это заранее, если таковая появится.",
+        default: true
+      },
+      debug: {
+        type: "checkbox",
+        label:
+          "Включить дополнительные логи в консоли. Для разработки и отладки.",
+        default: false
+      },
+      uuid: {
+        type: "hidden",
+        // label:
+        //   "Ваш уникальный UUID в системе рейтинга RPM. Позволяет вам оценивать профили других пользователей.",
+        default: ''
+      },
     },
-    minRatesCountToShowRatingBar: {
-      type: "int",
-      default: config.minRatesCountToShowRatingBar,
-      label:
-        "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. " +
-        "Установите на 0, чтобы всегда показывать.",
-    },
+    events: {
+      init() {
+        isConfigInit = true;
+  
+        formats.formatStoryMinuses = makeEval("story", this.get('minusesPattern') as string, (x: any) => x.minuses);
+        formats.formatCommentMinuses = makeEval("comment", this.get('minusesCommentPattern') as string, (x: any) => x.minuses);
+        formats.formatOwnComment = makeEval("comment", this.get('ownCommentPattern') as string, (x: any) => (x.pluses == 0 && x.minuses == 0) ? 0 : `${x.pluses}/${x.minuses}`);
+  
+        enableFilters = new RegExp(this.get('filteringPageRegex') as string).test(
+          window.location.href
+        );
+  
+        this.css.basic = [];
 
-    // НАСТРОЙКИ ПОСТОВ
-    minStoryRating: {
-      section: [
-        "Настройки постов", 
-      ],
-      type: "int",
-      default: config.minStoryRating,
-      label: "Посты с рейтингом ниже указанного будут удаляться из ленты. Вы сможете увидеть удалённые посты в списке просмотренных.",
-    },
-    ratingBar: {
-      type: "checkbox",
-      default: config.ratingBar,
-      label:
-        "Отображение соотношения плюсов и минусов у постов. При отсутствии оценок у поста будет показано соотношение 1:1.",
-    },
-    showBlockAuthorForeverButton: {
-      type: "checkbox",
-      default: config.showBlockAuthorForeverButton,
-      label:
-        "Отображение кнопки, которая блокирует автора поста навсегда. То есть добавляет в игнор-лист. " + 
-        "Вы должны быть авторизированы на сайте, иначе кнопка работать не будет.",
-    },
-    blockPaidAuthors: {
-      type: "checkbox",
-      default: config.blockPaidAuthors,
-      label:
-        "Удаляет из ленты посты от проплаченных авторов (которые с подпиской Пикабу+).",
-    },
-
-
-    videoDownloadButtons: {
-      type: "checkbox",
-      label:
-        "Добавляет ко всем видео в постах ссылки на источники, если их возможно найти.",
-      default: config.videoDownloadButtons,
-    },
-    socialLinks: {
-      type: "checkbox",
-      label:
-        "Добавляет в начале заголовка поста значки Телеграма, ВК, Тиктока, если в посте есть соответствующие ссылки.",
-      default: config.socialLinks
-    },
- 
-    // НАСТРОЙКИ КОММЕНТАРИЕВ
-    ratingBarComments: {
-      section: [
-        "Настройки комментариев", 
-      ],
-      type: "checkbox",
-      default: config.ratingBarComments,
-      label: "Отображение соотношения плюсов и минусов у комментариев.",
-    },
-    unrollCommentariesAutomatically: {
-      type: "checkbox",
-      default: config.unrollCommentariesAutomatically,
-      label: 
-        "Раскрывать все комментарии автоматически. Не рекомендую использовать со слабым интернетом."
-    },
-    allCommentsLoadedNotification: {
-      type: "checkbox",
-      default: config.allCommentsLoadedNotification,
-      label:
-        "Показывать уведомление о загрузке всех комментариев под постом."
-    },
-    commentVideoDownloadButtons: {
-      type: "checkbox",
-      default: config.commentVideoDownloadButtons,
-      label:
-        "Добавляет ко всем видео в комментариях ссылки на источники, если их возможно найти."
-    },
-
-    // НАСТРОЙКИ RPM
-    rpmEnabled: {
-      section: ["Настройки RPM", "Дополнительные функции скрипта. Используются сервера RPM."],
-      type: "checkbox",
-      default: config.rpmEnabled,
-      label:
-        "Включить для постов."
-    },
-    rpmMinStoryRating: {
-      type: "int",
-      default: config.rpmMinStoryRating,
-      label:
-        "Минимальный рейтинг автора в системе RPM. Если рейтинг автора меньше его значения, то его посты будут удалены из ленты."
-    },
-    rpmComments: {
-      type: "checkbox",
-      default: config.rpmEnabled,
-      label:
-        "Включить для комментариев."
-    },
-    registerRpm: {
-      type: "button",
-      label:
-        "Зарегистрироваться в системе RPM. После нажатия страница перезагрузится.",
-      async click() {
-        if (config.uuid === null || config.uuid === undefined || config.uuid === '') {
-          config.uuid = await RPM.Service.register();
-          GM_config.set('uuid', config.uuid);
-          GM_config.save();
-          sendNotification('Успешно', 'Вы успешно зарегистрировались. Или нет. Проверки успешности не существует.');
-          
-          await sleep(300);
-          window.location.reload();
-        } else {
-          sendNotification('Вы уже зарегистрированы', 'Вы не можете зарегистрироватся ещё раз.');
+        if (this.get('unrollCommentariesAutomatically')) {
+          this.set('unrollCommentatries', SettingEnums.UnrollComments.AUTO_UNROLL);
+          this.set('unrollCommentariesAutomatically', null);
+          this.save();
         }
       }
     },
-
-    // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
-    filteringPageRegex: {
-      section: ["Продвинутые настройки"],
-      type: "text",
-      label:
-        "Страницы, на которых работает фильтрация по рейтингу (регулярное выражение).",
-      default: config.filteringPageRegex,
-    },
-
-    minusesPattern: {
-      type: "text",
-      default: "story.minuses",
-      label:
-        "Шаблон отображения минусов у постов (JS). Пример: `story.minuses * 5000`. story: {id, rating, pluses, minuses}. Внутри может выполняться любой код, поэтому используйте с осторожностью.\n" +
-        "Шаблоны гарантированно работают только на Tampermonkey.",
-    },
-    minusesCommentPattern: {
-      type: "text",
-      default: "comment.minuses",
-      label:
-        "Шаблон отображения минусов у комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
-    },
-    ownCommentPattern: {
-      type: "text",
-      default:
-        "comment.pluses == 0 && comment.minuses == 0 ? 0 : comment.pluses == comment.minuses ? `+${comment.pluses} / -${comment.minuses}` : comment.pluses == 0 ? `-${comment.minuses}` : comment.minuses == 0 ? `+${comment.pluses}` : `+${comment.pluses} / ${comment.rating} / -${comment.minuses}`",
-      label:
-        "Шаблон отображения рейтинга у ВАШИХ комментариев (JS). Пример: `comment.minuses * 5000`. comment: {id, rating, pluses, minuses}.",
-    },
-
-    debug: {
-      type: "checkbox",
-      label:
-        "Включить дополнительные логи в консоли. Для разработки и отладки.",
-      default: config.debug
-    },
-    uuid: {
-      type: "hidden",
-      // label:
-      //   "Ваш уникальный UUID в системе рейтинга RPM. Позволяет вам оценивать профили других пользователей.",
-      default: config.uuid
-    },
-  },
-  events: {
-    init() {
-      isConfigInit = true;
-    },
-    save() {
-      config.update();
-    },
-  },
-  css: `
-  #prm .config_header p { margin: 0; }
-  #prm .config_header a { 
-    font-size: medium; 
-    margin: 0 10px;
-  }
-  #prm input { margin-right: 10px; }
-  #prm input[type=text] {
-    border: 1px solid #cccccc;
-    border-radius: 10px;
-    background: #ffffff !important;
-    outline: none;
-    height: 100%;
-   font-family: Tahoma;
-  }
-  #prm .config_var { 
-    margin: 10px 0;
-    display: flex
-  }
-  #prm .config_var .field_label {
-    padding-top: 4px;
-  }
-  `
-});
+    frame: frame
+  });
+}
+handleConfig();
 
 const logPrefix = "[RPM]";
 
 function info(...args: any): void {
-  if (config.debug) {
+  if (GM_config.get('debug')) {
     console.info(logPrefix, ...args);
   }
 }
 
 function warn(...args: any): void {
-  if (config.debug) {
+  if (GM_config.get('debug')) {
     console.warn(logPrefix, ...args);
   }
 }
 
 function error(...args: any): void {
-  if (config.debug) {
+  if (GM_config.get('debug')) {
     console.error(logPrefix, ...args);
   }
 }
@@ -1241,7 +1288,7 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     return;
   }
   
-  if (config.rpmComments)
+  if (GM_config.get('rpmComments'))
     processCommentRpm(commentElem);
 
   const userElem = commentElem.querySelector(".comment__user");
@@ -1262,7 +1309,7 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     const textRatingElem = commentElem.querySelector(
       ".comment__rating-count"
     ) as HTMLDivElement;
-    textRatingElem.innerText = config.formatOwnRating(comment);
+    textRatingElem.innerText = formats.formatOwnComment(comment);
     info('Обработал "свой" комментарий', comment.id);
     return;
   }
@@ -1271,9 +1318,9 @@ function processComment(comment: Pikabu.Comment | CommentData) {
   minusesText.classList.add("comment__rating-count");
   ratingDown.prepend(minusesText);
 
-  minusesText.textContent = config.formatCommentMinuses(comment);
+  minusesText.textContent = formats.formatCommentMinuses(comment);
 
-  if (config.summary) {
+  if (GM_config.get('summary')) {
     const summary = document.createElement("div");
     summary.classList.add("comment__rating-count", "rpm-summary");
     summary.textContent = comment.rating.toString();
@@ -1283,8 +1330,8 @@ function processComment(comment: Pikabu.Comment | CommentData) {
 
   const totalRates = comment.pluses + comment.minuses;
   if (
-    config.ratingBarComments &&
-    totalRates >= config.minRatesCountToShowRatingBar
+    GM_config.get('ratingBarComments') &&
+    totalRates >= (GM_config.get('minRatesCountToShowRatingBar') as number)
   ) {
     let ratio: number = 0.5;
 
@@ -1294,10 +1341,9 @@ function processComment(comment: Pikabu.Comment | CommentData) {
   }
 
   // Comment videos
-  if (config.commentVideoDownloadButtons) {
+  if (GM_config.get('commentVideoDownloadButtons')) {
     const videoElements = commentElem.querySelectorAll(':scope > .comment__body .comment-external-video');
     const videoCount = Math.min(videoElements.length, comment.videos.length)
-    console.log(videoElements);
     
     for (let i = 0; i < videoCount; ++i) {
       const elem = videoElements[i];
@@ -1333,7 +1379,7 @@ async function processStoryComments(
   if (storyData.hasMoreComments) {
     storyData = await Pikabu.DataService.fetchStory(storyId, page + 1);
     await processStoryComments(storyId, storyData, page + 1);
-  } else if (config.allCommentsLoadedNotification) {
+  } else if (GM_config.get('allCommentsLoadedNotification')) {
     sendNotification('Return Pikabu Minus', 'Все рейтинги комментариев загружены!');
   }
 }
@@ -1451,8 +1497,10 @@ async function checkStoryLinks(
 
 function removeStory(storyElem: HTMLDivElement, reason: string, keepUser: boolean = false) {
   const titleElem = storyElem.querySelector('.story__title a.story__title-link') as HTMLAnchorElement;
-  if (titleElem === null)
+  if (titleElem === null || storyElem.hasAttribute('rpm-deleted'))
     return;
+  
+  storyElem.setAttribute('rpm-deleted', '');
 
   const title = titleElem.textContent;
   const url = titleElem.href;
@@ -1534,12 +1582,12 @@ function processOldStory(
   } else {
     const minusesCounter = document.createElement("div");
     minusesCounter.classList.add("story__rating-count");
-    minusesCounter.textContent = config.formatMinuses(storyData.story);
+    minusesCounter.textContent = formats.formatStoryMinuses(storyData.story);
 
     ratingDown.prepend(minusesCounter);
   }
 
-  if (config.summary) {
+  if (GM_config.get('summary')) {
     const summary = document.createElement("div");
     if (isMobile)
       summary.classList.add("story__rating-rpm-count", "rpm-summary");
@@ -1550,7 +1598,7 @@ function processOldStory(
   }
 
   const totalRates = storyData.story.pluses + storyData.story.minuses;
-  if (config.ratingBar && totalRates >= config.minRatesCountToShowRatingBar) {
+  if (GM_config.get('ratingBar') && totalRates >= (GM_config.get('minRatesCountToShowRatingBar') as number)) {
     let ratio: number = 0.5;
 
     if (totalRates > 0) ratio = storyData.story.pluses / totalRates;
@@ -1565,24 +1613,23 @@ function processOldStory(
 
 async function processStory(story: HTMLDivElement, processComments: boolean) {
   // Block author button
-  if (config.showBlockAuthorForeverButton) {
+  if (GM_config.get('showBlockAuthorForeverButton')) {
     addBlockButton(story);
   }
 
   // Links
-  if (config.socialLinks) {
+  if (GM_config.get('socialLinks')) {
     checkStoryLinks(story);
   }
 
   // Block paid stories
   if (
     enableFilters &&
-    config.blockPaidAuthors &&
+    GM_config.get('blockPaidAuthors') &&
     story.querySelector(".user__label[data-type=\"pikabu-plus\"]") !== null
   ) {
     removeStory(story, "подписка Пикабу+", true);
-    info("Удалил пост", story, "как проплаченный:", `${config.blockPaidAuthors} = true`)
-    return;
+    info("Удалил пост", story, "как проплаченный")
   }
 
   const storyId = parseInt(story.getAttribute("data-story-id"));
@@ -1597,25 +1644,19 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   // delete the story if its ratings < the min rating
   if (
     enableFilters &&
-    storyData.story.rating < config.minStoryRating
+    storyData.story.rating < (GM_config.get('minStoryRating') as number)
   ) {
     removeStory(story, `рейтинг поста (${storyData.story.rating})`);
-    info("Удалил пост", story, "по фильтру рейтинга:", `storyData.story.rating < config.minStoryRating = ${storyData.story.rating} < ${config.minStoryRating} = true`)
-    return;
+    info("Удалил пост", story, "по фильтру рейтинга")
   }
 
   // videos
-  if (config.videoDownloadButtons)
+  if (GM_config.get('videoDownloadButtons'))
     processPostVideos(story, storyData);
   
-  try {
-    processOldStory(story, storyData);
-  } finally {
-    // Execute it if the previous call fails
-    if (config.rpmEnabled)
-      processStoryRpm(story);
-  }
-
+  if (GM_config.get('rpmEnabled'))
+    processStoryRpm(story);
+  processOldStory(story, storyData);
 }
 
 async function processStoryRpm(story: HTMLDivElement) {
@@ -1628,7 +1669,7 @@ async function processStoryRpm(story: HTMLDivElement) {
     if (!enableFilters) return;
     const rating = userInfo.base_rating + userInfo.pluses - userInfo.minuses + (userInfo.own_vote ?? 0);
 
-    if (rating < config.rpmMinStoryRating) {
+    if (rating < (GM_config.get('rpmMinStoryRating') as number)) {
       removeStory(story, `RPM-рейтинг (${rating})`, true);
     }
   }
@@ -1759,17 +1800,6 @@ function addVideoDownloadButtons(postId: number, url: string) {
   }
 }
 
-function unrollComments(button: HTMLButtonElement) {  
-  info('Раскручиваю ' + button.querySelector('span').textContent);
-  button.click();
-
-  setTimeout(() => {
-    if (document.body.contains(button)) {
-      unrollComments(button);
-    }
-  }, 500);
-}
-
 function mutationsListener(
   mutationList: MutationRecord[],
   observer: MutationObserver
@@ -1788,10 +1818,8 @@ function mutationsListener(
           const storyElem = node as HTMLDivElement;
           info('Поймал пост!', storyElem)
           processStory(storyElem, false);
-        } else if (node.matches(".comment__more") && config.unrollCommentariesAutomatically) {
-          const button = node as HTMLButtonElement;
-          info('Поймал кнопку!', button)
-          unrollComments(button);
+        } else if (node.matches(".comment__more:not(.rpm-unroll-all)")) {
+          commentMoreBtn()
         }
       }
     }
@@ -1808,7 +1836,7 @@ function addSettingsOpenButton() {
     ?? document.querySelector(".sidebar .sidebar__inner");
 
   if (block === null) {
-    console.error("[RPM] Не удалось найти место для создания кнопки открытия настроек.");
+    error("Не удалось найти место для создания кнопки открытия настроек.");
     return;
   }
 
@@ -1826,16 +1854,145 @@ function addSettingsOpenButton() {
   block.appendChild(button);
 }
 
+interface FeedbackSettings {
+  lastCheckDate: Date;
+  completed: number[];
+  saved: [Date, RpmJson.Schemas.Feedback][]
+}
+
+namespace FeedbackManager {
+  export async function init() {
+    const settings = await getSettings();
+  
+    const isToday = settings.lastCheckDate.toDateString() === new Date().toDateString();
+    
+    if (!isToday) {
+      const feedbacks = await RPM.Service.getFeedbacks();
+
+      feedbacks.forEach(feedback => {
+        if (settings.completed.includes(feedback.id)) return;
+        if (settings.saved.find(([, fb]) => fb.id == feedback.id) !== undefined)
+          return;
+        
+        settings.saved.push([new Date(), feedback]);
+        showFeedback(feedback);
+      });
+      
+      settings.lastCheckDate = new Date();
+      await updateSettings(settings);
+    } else {
+      showSavedFeedback();
+    }
+  }
+
+  async function showSavedFeedback() {
+    const settings = await getSettings();
+    const now = new Date();
+    const saved = settings.saved.filter(([date]) => date <= now).map(([, fb]) => fb);
+
+    if (saved.length === 0)
+      return;
+
+    for (const fb of saved) {
+      await showFeedback(fb);
+    }
+  }
+
+  async function getSettings() {
+    const settings = JSON.parse(await GM.getValue("rpm-feedback", JSON.stringify({
+      lastCheckDate: (() => { const date = new Date(); date.setDate(date.getDate() - 1); return date; })(),
+      completed: [],
+      saved: []
+    }))) as FeedbackSettings;
+
+    settings.lastCheckDate = new Date(settings.lastCheckDate);
+
+    for (const entry of settings.saved) {
+      entry[0] = new Date(entry[0]);
+    }
+
+    return settings;
+  }
+
+  function updateSettings(settings: FeedbackSettings) {
+    settings.saved = settings.saved.filter(fb => !settings.completed.includes(fb[1].id));
+    return GM.setValue("rpm-feedback", JSON.stringify(settings));
+  }
+
+  async function markCompleted(feedbackId: number) {
+    const settings = await getSettings();
+    settings.completed.push(feedbackId);
+
+    await updateSettings(settings);
+  }
+
+  let isFeedbackActive = false;
+  function showFeedback(feedback: RpmJson.Schemas.Feedback): Promise<void> {
+    if (isFeedbackActive) return Promise.resolve();
+    isFeedbackActive = true;
+
+    const deffered = new Deferred<void>();
+
+    const feedbackElem = document.createElement('div');
+    feedbackElem.classList.add('rpm-feedback-window');
+
+    const iframe = document.createElement('iframe');
+    iframe.src = feedback.iframe_url;
+
+    const completedButton = document.createElement('button');
+    completedButton.classList.add('rpm-completed');
+    completedButton.textContent = 'Закрыть';
+    completedButton.addEventListener('click', () => {
+      feedbackElem.remove();
+      markCompleted(feedback.id);
+      deffered.resolve();
+    });
+
+    feedbackElem.append(iframe, completedButton);
+    
+    document.body.append(feedbackElem);
+
+    return deffered.promise;
+  }
+}
+
+
+
+async function processTabs() {
+  const tabConfig = {
+    hot: 'hotTab',
+    best: 'bestTab',
+    new: 'newTab',
+    my_lent: 'subsTab',
+    communities: 'communitiesTab',
+    companies: 'blogsTab',
+    experts: 'expertsTab'
+  };
+
+  await waitForElement('.header-menu__item');
+
+  Object.entries(tabConfig).forEach(([key, field]) => {
+    const selector = `.header-menu__item[data-feed-key="${key}"]`;
+
+    if (!GM_config.get(field)) {
+      const element = document.querySelector(selector);
+      if (element) {
+        element.remove();
+      }
+    }
+  });
+}
+
 function init() {
   window.addEventListener("load", onLoad);
   main()
+  // FeedbackManager.init();
 }
 
 async function main() {
   await waitConfig;
-  config.update(); // Just in case.
 
-  if (config.uuid !== '') {
+  if (GM_config.get('uuid')) {
     delete GM_config.fields['registerRpm'];
   }
 
@@ -1966,9 +2123,6 @@ async function main() {
   width: 18px;
   height: 18px;
 }
-#prm {
-  border-radius: 10px;
-}
 @media only screen and (max-width: 768px)  {
   #prm {
     left: 2.5% !important;
@@ -2093,12 +2247,10 @@ async function main() {
 .rpm-placeholder:has(.collapse-button_active) + article {
   display: none;
 }
-
 .rpm-loading {
   display: none;
   min-width: 4px;
   min-height: 4px;
-  
   border: 7px solid var(--color-primary-400);
   border-top: 7px solid var(--color-primary-700);
   border-radius: 50%;
@@ -2109,10 +2261,249 @@ async function main() {
 }
 .rpm-not-ready .rpm-loading {
   display: block !important;
-}`);
+}
+.rpm-feedback-window {
+  position: fixed;
+  display: flex;
+  left: 70px;
+  top: 100px;
+  width: 450px;
+  height: 50%;
+  border: 1px solid var(--color-black-430);
+  border-radius: 8px;
+  background-color: var(--color-bright-800);
+  padding: 0;
+  flex-direction: column;
+}
+.rpm-feedback-window iframe {
+  width: 100%;
+}
+.comment__more:has(+.rpm-unroll-all),
+.rpm-unroll-all {
+  --gap: 10px;
+  width: calc(50% - var(--gap) / 2);
+  margin-right: var(--gap);
+  text-align: center;
+}
+.rpm-unroll-all {
+  display: none;
+  margin: auto 0;
+  background-color: var(--color-primary-700);
+  color: var(--color-bright-900);
+}
+.comment__more + .rpm-unroll-all {
+  display: inline-block;
+}
+#prm {
+  background-color: var(--color-black-440);
+  border-radius: 15px;
+  border: none !important;
+}
+#prm .field_label {
+  font-size: 14px;
+  font-weight: bold;
+}
+#prm .radio_label {
+  font-size: 14px;
+}
+#prm .config_var {
+  margin: 0 0 4px;
+}
+#prm .section_header {
+  color: #FFF;
+  font-size: 13pt;
+  margin: 0;
+}
+#prm .section_desc {
+  color: var(--color-black-700);
+  font-size: 9pt;
+  margin: 0 0 6px;
+}
+#prm_wrapper {
+  --gap: 10px;
+  box-sizing: border-box;
+  padding: 15px;
+  margin: 0;
+  display: flex;
+  flex-flow: row wrap;
+  align-content: space-evenly;
+  gap: var(--gap);
+}
+#prm_header {
+  height: max-content;
+  flex: 0 0 100%;
+}
+#prm_header p {
+  font-size: x-large;
+}
+#prm_header a {
+  font-size: large;
+  text-decoration: underline;
+  margin: 0 10px;
+}
+.section_header_holder {
+  margin: 8px auto 0;
+  display: block;
+  padding: 10px;
+  flex-basis: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background-color: var(--color-black-430);
+}
+#prm_section_1,
+#prm_section_2 {
+  flex: 1;
+}
+#prm_buttons_holder {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-flow: row wrap;
+}
+#prm_buttons_holder .reset_holder {
+  flex-basis: 100%;
+  text-align: right;
+}
+#prm_wrapper .section_header.center {
+  font-size: large;
+  display: block;
+  width: calc(100% + 20px);
+  text-align: center;
+  margin: -10px -10px 0;
+  background-color: var(--color-primary-700);
+  padding: 2px 0;
+}
+#prm_wrapper .config_var {
+  width: 100%;
+  margin-top: 5px;
+  font-size: medium;
+}
+#prm_wrapper .config_var input,
+#prm_wrapper .config_var select {
+  margin-right: 10px;
+}
+#prm_wrapper .config_var input[type=text] {
+  background-color: var(--color-black-440);
+  padding: 2px;
+  border: solid 1px black;
+  border-radius: 7px;
+  padding: 4px;
+  width: 30%;
+}
+#prm_wrapper input[type=button],
+#prm_wrapper button {
+  background-color: var(--color-black-440);
+  color: var(--color-black-700);
+  transition: background-color 200ms ease-out, filter 200ms, color 200ms;
+  padding: 0px 20px;
+  vertical-align: middle;
+  box-sizing: border-box;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 32px;
+  font-weight: 500;
+  max-width: 100%;
+  text-wrap: balance;
+}
+#prm_buttons_holder button {
+  background-color: var(--color-black-300);
+}
+#prm_wrapper input[type=button]:hover {
+  background-color: var(--color-black-500);
+}
+#prm_wrapper input[type=checkbox] {
+  margin-right: 10px;
+  width: 1.25em;
+  height: 1.25em;
+}
+#prm_wrapper select {
+  background-color: var(--color-black-440);
+  color: var(--color-black-700);
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  outline: none;
+}
+#prm_section_3 .config_var {
+  display: inline-block;
+  width: calc(100%/7);
+  min-width: max-content;
+  padding: 0 5px;
+  text-align: center;
+}
+#prm_section_5 .config_var input[type=text] {
+  width: 30em;
+  max-width: 100%;
+}
+@media only screen and (max-width: 768px)  {
+  #prm {
+    width: unset !important;
+    height: unset !important;
+    left: 10px !important;
+    right: 10px !important;
+    top: 10px !important;
+    bottom: 10px !important;
+  }
+  #prm_section_1,
+  #prm_section_2 {
+    flex: unset;
+  }
+  #prm .config_var {
+    margin-bottom: 20px;
+  }
+  #prm .config_var:last-child {
+    margin-bottom: unset;
+  }
+}  /* Notifications */
+@keyframes rpm-notification-intro {
+  from {
+    translate: -100%;
+  }
+  to {
+    translate: 0%;
+  }
+}
+`);
+}
+
+function unrollComments(button: HTMLButtonElement) {  
+  button.click();
+
+  setTimeout(() => {
+    if (document.body.contains(button)) {
+      unrollComments(button);
+    }
+  }, 500);
+}
+
+function commentMoreBtn() {
+  const value = GM_config.get('unrollCommentaries');
+
+  if (value === SettingEnums.UnrollComments.NONE) return;
+
+  const moreButton = document.querySelector('.comment__more') as HTMLButtonElement;
+  if (!moreButton) return;
+
+  if (value === SettingEnums.UnrollComments.UNROLL_ALL_BUTTON) {
+    const btn = document.createElement('button');
+    btn.textContent = 'Раскрыть все комментарии';
+    btn.classList.add('rpm-unroll-all');
+
+    btn.addEventListener('click', () => {
+      btn.remove();
+      unrollComments(moreButton);
+    });
+
+    moreButton.parentElement.append(btn);
+  } else if (value === SettingEnums.UnrollComments.AUTO_UNROLL) {
+    unrollComments(moreButton);
+  }
 }
 
 async function onLoad() {
+  processTabs();
   observer = new MutationObserver(mutationsListener);
   observer.observe(document.querySelector(".app__content, .main__inner"), {
     childList: true,

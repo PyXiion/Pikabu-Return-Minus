@@ -130,6 +130,27 @@ declare namespace PikabuJson
 }
 
 declare namespace RpmJson {
+  namespace Schemas {
+    interface UserInfo {
+      pluses: number;
+      minuses: number;
+      base_rating: number;
+      own_vote?: number;
+    }
+
+    interface Feedback {
+      id: number;
+      start_date: string;
+      end_date: string;
+
+      title: string;
+      description: string;
+      iframe_url: string;
+    }
+  }
+
+  type UserInfo = Schemas.UserInfo;
+
   interface AuthRequired {
     user_uuid: string;
   }
@@ -150,21 +171,16 @@ declare namespace RpmJson {
 
   interface InfoRequest extends AuthOptional {}
 
-  interface UserInfo {
-    pluses: number;
-    minuses: number;
-    base_rating: number;
-    own_vote?: number;
-  }
-
   interface InfoBunchRequest {
     ids: number[];
     user_uuid?: string;
   }
 
   interface InfoBunchResponse {
-    users: {[id: number]: UserInfo}
+    users: {[id: number]: Schemas.UserInfo}
   }
+
+  type MetaFeedbackResponse = Schemas.Feedback[];
 }
 
 // GM_config
