@@ -1668,8 +1668,9 @@ async function processStoryRpm(story: HTMLDivElement) {
   function ratingCallback(userInfo: RpmJson.UserInfo) {
     if (!enableFilters) return;
     const rating = userInfo.base_rating + userInfo.pluses - userInfo.minuses + (userInfo.own_vote ?? 0);
+    const ownVote = userInfo.own_vote ?? 0;
 
-    if (rating < (GM_config.get('rpmMinStoryRating') as number)) {
+    if (ownVote < 0 || rating < (GM_config.get('rpmMinStoryRating') as number) && ownVote != 1) {
       removeStory(story, `RPM-рейтинг (${rating})`, true);
     }
   }
