@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.8.1
+// @version      0.9
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -8,7 +8,7 @@
 // @connect      api.pikabu.ru
 // @connect      pikabu.ru
 // @connect      rpm.pyxiion.ru
-// @run-at       document-body
+// @connect      gollum.space
 // @grant        GM.xmlHttpRequest
 // @grant        GM.getValue
 // @grant        GM.setValue
@@ -633,10 +633,23 @@ namespace RPM {
   }
 
   export namespace Nodes {
+    
+    export function createLoadingIcon() {
+      const loadingIcon = document.createElement('div');
+      loadingIcon.classList.add('rpm-loading');
+      return loadingIcon;
+    }
+
+    export function createPoweredNote(text: string) {
+      const elem = document.createElement('span');
+      elem.classList.add('rpm-powered');
+      elem.innerHTML = text;
+      return elem;
+    }
 
     export function createUserRatingNode(uid: number, infoConsumer: (info: RpmJson.UserInfo) => void = null) {
       const elem = document.createElement('div');
-      elem.classList.add('rpm-user-rating', 'hint', 'rpm-not-ready', `rpm-user-rating-${uid}`);
+      elem.classList.add('rpm-user-rating', 'hint', `rpm-user-rating-${uid}`);
 
       elem.setAttribute('aria-label', 'Рейтинг автора в RPM');
       elem.setAttribute('pikabu-user-id', uid.toString());
@@ -647,12 +660,11 @@ namespace RPM {
         elem.appendChild(e);
 
         e.innerText = '0';
-
+        e.style.display = 'none';
         return e;
       }
 
-      const loadingIcon = document.createElement('div');
-      loadingIcon.classList.add('rpm-loading');
+      const loadingIcon = createLoadingIcon();
       elem.appendChild(loadingIcon);
       
       const plusElem = addSpan("rpm-pluses");
@@ -685,11 +697,17 @@ namespace RPM {
           elem.setAttribute('rpm-own-vote', info.own_vote.toString());
 
 
-        (elem.querySelector('.rpm-pluses') as HTMLSpanElement).innerText = pluses.toString();
-        (elem.querySelector('.rpm-rating') as HTMLSpanElement).innerText = rating.toString();
-        (elem.querySelector('.rpm-minuses') as HTMLSpanElement).innerText = minuses.toString();
+        function set(sel: string, value: number) {
+          const e = elem.querySelector(sel) as HTMLSpanElement;
+          e.style.display = '';
+          e.innerText = value.toString();
+        }
 
-        elem.classList.remove('rpm-not-ready');
+        set('.rpm-pluses', pluses);
+        set('.rpm-rating', rating);
+        set('.rpm-minuses', minuses);
+
+        elem.querySelector('.rpm-loading').remove();
       }
 
       export async function updateUserRatingElemAsync(elem: HTMLDivElement, infoConsumer: (info: RpmJson.UserInfo) => void = null) {
@@ -745,6 +763,224 @@ namespace RPM {
         // TODO: check response
       }
     }
+
+    namespace LastComments {
+      const CHUNK_SIZE = 5;
+
+      const parser = new DOMParser();
+
+      interface GollumCommentInfo {
+        id: number;
+        postId: number;
+        postTitle: string;
+        rating: string;
+        link: string;
+      }
+
+      async function loadCommentFromPikabu(info: GollumCommentInfo, parent: boolean = false) {
+        // const response = await fetch(commentLink);
+        const request = new HttpRequest(info.link);
+        const response = await request.executeAsync();
+        
+        const htmlDoc = parser.parseFromString(response.responseText, 'text/html');
+
+        const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
+
+        const commentElem = htmlDoc.getElementById(`comment_${info.id}`);
+        commentElem.classList.add('rpm-highlight-comment')
+
+        const clone = wantedElem.cloneNode(true) as HTMLDivElement;
+
+        postprocessPikabuComment(clone);
+
+        return clone;
+      }
+
+      function postprocessPikabuComment(element: HTMLDivElement) {
+        element.classList.add('rpm-comment-no-js');
+
+        element.querySelectorAll('.comment__user').forEach((x: HTMLDivElement) => {
+          x.removeAttribute('data-profile')
+        })
+        element.querySelectorAll('img').forEach((x: HTMLImageElement) => {
+          if (x.hasAttribute('data-src')) {
+            x.src = x.getAttribute('data-src');
+            x.classList.add('image-loaded');
+          }
+        })
+      }
+
+      function createCommentContainer(info: GollumCommentInfo, autoload: boolean = false) {
+        const container = document.createElement('div');
+        container.classList.add('rpm-comment-container');
+
+
+        const title = document.createElement('a');
+        title.href = info.link;
+        title.target = "_blank";
+        title.textContent = `${info.rating} | ${info.postTitle}`
+
+
+        const loadFull = async () => {
+          const icon = createLoadingIcon();
+          preview.replaceWith(icon);
+
+          const pikabuComment = await loadCommentFromPikabu(info, true);
+          icon.replaceWith(pikabuComment);
+        };
+
+        const preview = createCommentPreview(info, loadFull);
+        
+        container.append(title, preview);
+
+        if (autoload) {
+          loadFull();
+        }
+
+        return container;
+      }
+
+      function createCommentPreview(info: GollumCommentInfo, loadCallback: (() => any)): HTMLDivElement {
+        const container = document.createElement('div');
+        container.classList.add('rpm-comment-preview');
+
+        const buttonToLoad = document.createElement('button');
+        buttonToLoad.textContent = 'Загрузить';
+        buttonToLoad.addEventListener('click', loadCallback);
+
+        container.append(buttonToLoad);
+
+        return container;
+      }
+  
+      async function loadCommentsFromGollum(userName: string): Promise<GollumCommentInfo[]> {
+        const response = await fetch(`https://gollum.space/user/${userName}-last`);
+        const htmlDoc = parser.parseFromString(await response.text(), 'text/html');
+
+        const comments = Array.from(htmlDoc.querySelectorAll('.comment-block')) as HTMLDivElement[];
+
+        return comments.map(elem => {
+          const anchor = elem.querySelector('.comment-link') as HTMLAnchorElement;
+          const [rating, postTitle] = elem.getAttribute('title').split('|').map(x => x.trim());
+
+          return {
+            id: parseInt(anchor.textContent),
+            postId: parseInt(elem.getAttribute('post')),
+            postTitle,
+            rating,
+            link: anchor.href.replace('pikabu.ru', 'gollum.space')
+          }
+        })
+      }
+
+      export function createLastCommentsSection(userName: string, autoloadCount = 0) {
+        const main = document.createElement('div');
+        main.classList.add('rpm-last-comments');
+  
+        const title = document.createElement('h4');
+        title.textContent = 'Последние комментарии';
+  
+
+        const containerOfComments = document.createElement('div');
+        containerOfComments.classList.add('rpm-last-comments-container');
+
+        const loadingIcon = createLoadingIcon();
+        containerOfComments.append(loadingIcon);
+
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.textContent = 'Больше комментариев'
+
+        main.append(title, containerOfComments, loadMoreBtn);
+  
+        async function *loadComments() {
+          const comments = await loadCommentsFromGollum(userName);
+          loadingIcon.remove();
+
+          if (comments.length === 0) {
+            containerOfComments.append('Комментарии не найдены.')
+          } else {
+            let count = 0;
+            for (const comment of comments) {
+              containerOfComments.append(createCommentContainer(comment, count < autoloadCount))
+
+              if (++count % CHUNK_SIZE == 0) {
+                yield;
+              }
+            }
+          }
+
+          loadMoreBtn.remove();
+        }
+
+        const loader = loadComments()
+        loader.next();
+        loadMoreBtn.addEventListener('click', () => loader.next());
+
+        return main;
+      }
+    }
+
+    export const createLastCommentsSection = LastComments.createLastCommentsSection;
+    
+    namespace TagsSection {
+      function createTag(name: string) {
+        const elem = document.createElement('span');
+        elem.classList.add('rpm-tags-tag');
+        elem.textContent = name;
+        return elem;
+      }
+  
+      export function createTagsSection(userId: number, tagsGetter: ((userId: number) => Promise<string[]>), autoload = false) {
+        const elem = document.createElement('div');
+        elem.classList.add('rpm-tags-list');
+        elem.innerHTML = '<span class="rpm-clickable">Нажмите, чтобы загрузить.</span>'
+  
+        const loadTags = () => {
+          const loadingIcon = RPM.Nodes.createLoadingIcon();
+          elem.replaceChildren(loadingIcon);
+          tagsGetter(userId).then((tags: string[]) => {
+            const tagElems = tags.map(createTag);
+            if (tagElems.length > 0) {
+              elem.append(...tagElems);
+            } else {
+              elem.append('Теги не найдены.')
+            }
+            loadingIcon.remove();
+          }, () => {
+            elem.textContent = 'Не удалось получить теги.'
+          });
+        };
+  
+        if (!autoload) {
+          const onClick = () => {
+            loadTags();
+            elem.removeEventListener('click', onClick);
+          };
+          elem.addEventListener('click', onClick);
+        } else {
+          loadTags();
+        }
+        
+  
+        return elem;
+      }
+      
+      export function createTagsContainer(userId: number, name: string, getter: (userId: number) => Promise<string[]>, autoload = false) {
+        const elem = document.createElement('div');
+        elem.classList.add('rpm-tags');
+  
+        const nameElem = document.createElement('h4');
+        nameElem.textContent = name;
+  
+        const tagsList = RPM.Nodes.createTagsSection(userId, getter, autoload);
+  
+        elem.append(nameElem, tagsList);
+  
+        return elem;
+      }
+    }
+    export const createTagsSection = TagsSection.createTagsSection;
+    export const createTagsContainer = TagsSection.createTagsContainer;
   }
 }
 
@@ -762,12 +998,13 @@ class Deferred<T> {
     })
   }
 }
-function waitForElement(selector, timeout = 5000) {
+function waitForElement(selector, timeout = 5000, parent = null) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
+    parent = parent ?? document;
 
     const checkExistence = () => {
-      const element = document.querySelector(selector);
+      const element = parent.querySelector(selector);
       if (element) {
         resolve(element);
       } else if (Date.now() - startTime >= timeout) {
@@ -782,621 +1019,716 @@ function waitForElement(selector, timeout = 5000) {
 }
 
 const STYLES = `.story__footer .story__rating-up {
-    margin-right: 5px !important;
-  }
-  .prm-minuses {
-    padding-left: 7px !important;
-    margin: 0px !important;
-  }
-  .story__rating-count {
-    margin: 7px 0 7px;
-  }
-  .rpm-story-summary {
-    margin: 14px 0 4px;
-  }
-  .rpm-summary-comment {
-    margin-right: 8px;
-  }
-  .comment__rating-down .comment__rating-count {
-    margin-right: 8px;
-  }
-  .comment__rating-down {
-    padding: 2px 8px;
-  }
-  .story__footer .story__rating-rpm-count {
-    font-size: 13px;
-    color: var(--color-black-700);
-    margin: auto 7px auto 7px;
-    line-height: 0;
-    display: block;
-  }
-  .story__footer .rpm-summary,
-  .comment .rpm-summary {
-    margin: auto 9px auto 0px;
-    font-weight: 500;
-  }
-  .comment__rating-rpm-count {
-    padding: 2px 8px;
-    flex-shrink: 0;
-    margin-left: auto;
-  }
-  .rpm-rating-bar {
-    width: 5px;
-    background: var(--color-danger-800);
-    height: 90%;
-    position: absolute;
-    right: -9.5px;
-    top: 5%;
-    border-radius: 5px;
-  }
-  .rpm-rating-bar-inner {
-    background: var(--color-primary-700);    /* width: 99%; */
-    border-radius: 5px;
-  }
-  .comment__body {
-    position: relative;
-  }
-  .comment .rpm-rating-bar {
-    height: 70px;
-    top: 15px;
-    left: -10px;
-  }  /* old mobile interface */
-  .story__footer-rating .story__rating-minus {
-    background-color:var(--color-black-300);
-    border-radius:8px;
-    overflow:hidden;
-    padding:0;
-    display:flex;
-    align-items:center  ;
-  }
-  .story__footer-rating .story__rating-down {
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding-left:2px  ;
-  }
-  .rpm-download-video-button {
-    margin-left: 3px;
-  }
-  .rpm-block-author {
-    overflow:hidden;
-    margin-right:24px;
-    cursor:pointer;
-    display:flex;
-    align-items:center;
-    padding:0;
-    background:0 0
-  }
-  .rpm-block-author:hover * {
-    fill: var(--color-danger-800);
-  }
-  .story__footer-tools-inner .rpm-block-author {
-    overflow: visible;
-    margin-right: auto;
-    margin-left:8px;
-    transform: scale(1.3);
-  }
-  .rpm-open-settings-button {
-    margin-top: 10px;
-    text-align: center;
-    width: 100%;
-    font-size: 0.9em;
-  }
-  .rpm-video-list {
-    text-align: center;
-  }
-  .rpm-video-list a {
-    margin: 0 5px;
-  }
-  .rpm-story-icon {
-    width: 24px;
-    height: 24px;
-    padding: 0 4px;
-    margin-right: 6px;
-    vertical-align: text-top;
-    border-radius: 3px;
-  }
-  .rpm-story-icon svg {
-    margin-top: auto;
-    padding: 2px 0px;
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    transition: all ease 300ms;
-  }
-  .rpm-story-icon:hover svg {
-    width: 18px;
-    height: 18px;
-  }
-  @media only screen and (max-width: 768px)  {
-    #prm {
-      left: 2.5% !important;
-      width: 100% !important;
-    }
-  }  /* Notifications */
-  @keyframes rpm-notification-intro {
-    from {
-      translate: -100%;
-    }
-    to {
-      translate: 0%;
-    }
-  }
-  @keyframes rpm-notification-outro {
-    from {
-      translate: 0 0%;
-      opacity: 1.0;
-    }
-    to {
-      translate: 0 -200%;
-      opacity: 0;
-    }
-  }
-  .rpm-notification {
-    position: fixed;
-    bottom: 15px;
-    left: 15px;
-    z-index: 9999;
-    overflow: hidden;
-    max-width: 250px;
-    background: var(--color-black-100);
-    border-radius: 10px;
-    border: 1px solid var(--color-black-440);
-    pointer-events: none;
-  }
-  .rpm-notification * {
-    padding: 5px 15px;
-  }
-  .rpm-notification-header {
-    background: var(--color-primary-800);
-    color: white;
-    font-weight: bolder;
-  }
-  .rpm-user-rating {
-    font-size: 1.05em;
-    padding: 0.3em 0.6em;
-    border-radius: 1rem;
-    display: inline-block;
-    background-color: var(--color-black-alpha-005);
-    user-select: none;
-    white-space: nowrap;
-    line-height: 1em;
-  }
-  .story__main .rpm-user-rating,
-  .rpm-placeholder .rpm-user-rating {
-    margin-right: 10px;
-  }
-  .comment__header .rpm-user-rating {
-    margin-left:auto;
-    right: 0;
-  }
-  .rpm-user-rating + .comment__right {
-    margin-left: unset;
-  }
-  .rpm-user-rating span {
-    display: inline-block;
-    min-width: 1.5ch;
-    text-align: center;
-  }
-  .rpm-user-rating .rpm-rating {
-    margin: 0 1ch;
-  }
-  .rpm-user-rating .rpm-pluses {
-    color: var(--color-primary-700);
-    cursor: pointer;
-  }
-  .rpm-user-rating .rpm-minuses {
-    color: var(--color-danger-900);
-    cursor: pointer;
-  }
-  .rpm-user-rating[rpm-own-vote="1"] {
-    background-color: var(--color-primary-200)
-  }
-  .rpm-user-rating[rpm-own-vote="-1"] {
-    background-color: var(--color-danger-200)
-  }
-  .rpm-placeholder {
-    background-color: var(--color-bright-800);
-    border: 1px solid var(--color-black-430);
-    border-radius: 15px;
-    width: max-content;
-    height: max-content;
-    text-align: center;
-    margin: 10px auto 0;
-    padding: 5px 20px;
-    position: relative;
-    max-width: 95%;
-  }
-  .rpm-placeholder .rpm-user-info-container {
-    width: max-content;
-    padding: 0.5em;
-    border-radius: 10px;
-    margin: 0 auto;
-  }
-  .rpm-placeholder .collapse-button {
-    position: absolute;
-    top: 0;
-    left: -70px;
-    translate: 0 -70%;
-  }
-  .mv .rpm-placeholder {
-    font-size: 0.825em;
-  }
-  .mv .rpm-placeholder .collapse-button {
-    display: inline flow-root list-item;
-    position: initial;
-    margin: 0 auto;
-    translate: 0 0;
-    transform: scale(0.75);
-  }
-  .rpm-placeholder:has(.collapse-button_active) + article {
-    display: none;
-  }
-  .rpm-loading {
-    display: none;
-    min-width: 4px;
-    min-height: 4px;
-    border: 7px solid var(--color-primary-400);
-    border-top: 7px solid var(--color-primary-700);
-    border-radius: 50%;
-    animation: spin 1.5s linear infinite;
-  }
-  .rpm-not-ready * {
-    display: none !important;
-  }
-  .rpm-not-ready .rpm-loading {
-    display: block !important;
-  }
-  .rpm-feedback-window {
-    position: fixed;
-    display: flex;
-    left: 70px;
-    top: 100px;
-    width: 450px;
-    height: 50%;
-    border: 1px solid var(--color-black-430);
-    border-radius: 8px;
-    background-color: var(--color-bright-800);
-    padding: 0;
-    flex-direction: column;
-  }
-  .rpm-feedback-window iframe {
-    width: 100%;
-  }
-  .comment__more:has(+.rpm-unroll-all),
-  .rpm-unroll-all {
-    --gap: 10px;
-    width: calc(50% - var(--gap) / 2);
-    margin-right: var(--gap);
-    text-align: center;
-  }
-  .rpm-unroll-all {
-    display: none;
-    margin: auto 0;
-    background-color: var(--color-primary-700);
-    color: var(--color-bright-900);
-  }
-  .comment__more + .rpm-unroll-all {
-    display: inline-block;
-  }
+  margin-right: 5px !important;
+}
+.prm-minuses {
+  padding-left: 7px !important;
+  margin: 0px !important;
+}
+.story__rating-count {
+  margin: 7px 0 7px;
+}
+.rpm-story-summary {
+  margin: 14px 0 4px;
+}
+.rpm-summary-comment {
+  margin-right: 8px;
+}
+.comment__rating-down .comment__rating-count {
+  margin-right: 8px;
+}
+.comment__rating-down {
+  padding: 2px 8px;
+}
+.story__footer .story__rating-rpm-count {
+  font-size: 13px;
+  color: var(--color-black-700);
+  margin: auto 7px auto 7px;
+  line-height: 0;
+  display: block;
+}
+.story__footer .rpm-summary,
+.comment .rpm-summary {
+  margin: auto 9px auto 0px;
+  font-weight: 500;
+}
+.comment__rating-rpm-count {
+  padding: 2px 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.rpm-rating-bar {
+  width: 5px;
+  background: var(--color-danger-800);
+  height: 90%;
+  position: absolute;
+  right: -9.5px;
+  top: 5%;
+  border-radius: 5px;
+}
+.rpm-rating-bar-inner {
+  background: var(--color-primary-700);    /* width: 99%; */
+  border-radius: 5px;
+}
+.comment__body {
+  position: relative;
+}
+.comment .rpm-rating-bar {
+  height: 70px;
+  top: 15px;
+  left: -10px;
+}  /* old mobile interface */
+.story__footer-rating .story__rating-minus {
+  background-color:var(--color-black-300);
+  border-radius:8px;
+  overflow:hidden;
+  padding:0;
+  display:flex;
+  align-items:center  ;
+}
+.story__footer-rating .story__rating-down {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding-left:2px  ;
+}
+.rpm-download-video-button {
+  margin-left: 3px;
+}
+.rpm-block-author {
+  overflow:hidden;
+  margin-right:24px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  padding:0;
+  background:0 0
+}
+.rpm-block-author:hover * {
+  fill: var(--color-danger-800);
+}
+.story__footer-tools-inner .rpm-block-author {
+  overflow: visible;
+  margin-right: auto;
+  margin-left:8px;
+  transform: scale(1.3);
+}
+.rpm-open-settings-button {
+  margin-top: 10px;
+  text-align: center;
+  width: 100%;
+  font-size: 0.9em;
+}
+.rpm-video-list {
+  text-align: center;
+}
+.rpm-video-list a {
+  margin: 0 5px;
+}
+.rpm-story-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  margin-right: 6px;
+  vertical-align: text-top;
+  border-radius: 3px;
+}
+.rpm-story-icon svg {
+  margin-top: auto;
+  padding: 2px 0px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  transition: all ease 300ms;
+}
+.rpm-story-icon:hover svg {
+  width: 18px;
+  height: 18px;
+}
+@media only screen and (max-width: 768px)  {
   #prm {
-    background-color: var(--color-black-440);
-    border-radius: 15px;
-    border: none !important;
+    left: 2.5% !important;
+    width: 100% !important;
   }
-  #prm .field_label {
-    font-size: 14px;
-    font-weight: bold;
+}  /* Notifications */
+@keyframes rpm-notification-intro {
+  from {
+    translate: -100%;
   }
-  #prm .radio_label {
-    font-size: 14px;
+  to {
+    translate: 0%;
   }
-  #prm .config_var {
-    margin: 0 0 4px;
+}
+@keyframes rpm-notification-outro {
+  from {
+    translate: 0 0%;
+    opacity: 1.0;
   }
-  #prm .section_header {
-    color: #FFF;
-    font-size: 13pt;
-    margin: 0;
+  to {
+    translate: 0 -200%;
+    opacity: 0;
   }
-  #prm .section_desc {
-    color: var(--color-black-700);
-    font-size: 9pt;
-    margin: 0 0 6px;
-  }
-  #prm_wrapper {
-    --gap: 10px;
-    box-sizing: border-box;
-    padding: 15px;
-    margin: 0;
-    display: flex;
-    flex-flow: row wrap;
-    align-content: space-evenly;
-    gap: var(--gap);
-  }
-  #prm_header {
-    height: max-content;
-    flex: 0 0 100%;
-  }
-  #prm_header p {
-    font-size: x-large;
-  }
-  #prm_header a {
-    font-size: large;
-    text-decoration: underline;
-    margin: 0 10px;
-  }
-  .section_header_holder {
-    margin: 8px auto 0;
-    display: block;
-    padding: 10px;
-    flex-basis: 100%;
-    overflow: hidden;
-    border-radius: 10px;
-    background-color: var(--color-black-430);
+}
+.rpm-notification {
+  position: fixed;
+  bottom: 15px;
+  left: 15px;
+  z-index: 9999;
+  overflow: hidden;
+  max-width: 250px;
+  background: var(--color-black-100);
+  border-radius: 10px;
+  border: 1px solid var(--color-black-440);
+  pointer-events: none;
+}
+.rpm-notification * {
+  padding: 5px 15px;
+}
+.rpm-notification-header {
+  background: var(--color-primary-800);
+  color: white;
+  font-weight: bolder;
+}
+.rpm-user-rating {
+  font-size: 1.05em;
+  padding: 0.3em 0.6em;
+  border-radius: 1rem;
+  display: inline-block;
+  background-color: var(--color-black-alpha-005);
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1em;
+}
+.story__main .rpm-user-rating,
+.rpm-placeholder .rpm-user-rating {
+  margin-right: 10px;
+}
+.comment__header .rpm-user-rating {
+  margin-left:auto;
+  right: 0;
+}
+.rpm-user-rating + .comment__right {
+  margin-left: unset;
+}
+.rpm-user-rating span {
+  display: inline-block;
+  min-width: 1.5ch;
+  text-align: center;
+}
+.rpm-user-rating .rpm-rating {
+  margin: 0 1ch;
+}
+.rpm-user-rating .rpm-pluses {
+  color: var(--color-primary-700);
+  cursor: pointer;
+}
+.rpm-user-rating .rpm-minuses {
+  color: var(--color-danger-900);
+  cursor: pointer;
+}
+.rpm-user-rating[rpm-own-vote="1"] {
+  background-color: var(--color-primary-200)
+}
+.rpm-user-rating[rpm-own-vote="-1"] {
+  background-color: var(--color-danger-200)
+}
+.rpm-placeholder {
+  background-color: var(--color-bright-800);
+  border: 1px solid var(--color-black-430);
+  border-radius: 15px;
+  width: max-content;
+  height: max-content;
+  text-align: center;
+  margin: 10px auto 0;
+  padding: 5px 20px;
+  position: relative;
+  max-width: 95%;
+}
+.rpm-placeholder .rpm-user-info-container {
+  width: max-content;
+  padding: 0.5em;
+  border-radius: 10px;
+  margin: 0 auto;
+}
+.rpm-placeholder .collapse-button {
+  position: absolute;
+  top: 0;
+  left: -70px;
+  translate: 0 -70%;
+}
+.mv .rpm-placeholder {
+  font-size: 0.825em;
+}
+.mv .rpm-placeholder .collapse-button {
+  display: inline flow-root list-item;
+  position: initial;
+  margin: 0 auto;
+  translate: 0 0;
+  transform: scale(0.75);
+}
+.rpm-placeholder:has(.collapse-button_active) + article {
+  display: none;
+}
+.rpm-loading {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border: 7px solid var(--color-primary-400);
+  border-top: 7px solid var(--color-primary-700);
+  border-radius: 50%;
+  animation: spin 1.5s linear infinite;
+  margin: auto;
+}
+.rpm-feedback-window {
+  position: fixed;
+  display: flex;
+  left: 70px;
+  top: 100px;
+  width: 450px;
+  height: 50%;
+  border: 1px solid var(--color-black-430);
+  border-radius: 8px;
+  background-color: var(--color-bright-800);
+  padding: 0;
+  flex-direction: column;
+}
+.rpm-feedback-window iframe {
+  width: 100%;
+}
+.comment__more:has(+.rpm-unroll-all),
+.rpm-unroll-all {
+  --gap: 10px;
+  width: calc(50% - var(--gap) / 2);
+  margin-right: var(--gap);
+  text-align: center;
+}
+.rpm-unroll-all {
+  display: none;
+  margin: auto 0;
+  background-color: var(--color-primary-700);
+  color: var(--color-bright-900);
+}
+.comment__more + .rpm-unroll-all {
+  display: inline-block;
+}
+#prm {
+  background-color: var(--color-black-440);
+  border-radius: 15px;
+  border: none !important;
+}
+#prm .field_label {
+  font-size: 14px;
+  font-weight: bold;
+}
+#prm .radio_label {
+  font-size: 14px;
+}
+#prm .config_var {
+  margin: 0 0 4px;
+}
+#prm .section_header {
+  color: #FFF;
+  font-size: 4em;
+  margin: 0;
+}
+#prm .section_desc {
+  color: var(--color-black-700);
+  font-size: 9pt;
+  margin: 0 0 6px;
+}
+#prm_wrapper {
+  --gap: 10px;
+  box-sizing: border-box;
+  padding: 15px;
+  margin: 0;
+  display: flex;
+  flex-flow: row wrap;
+  align-content: space-evenly;
+  gap: var(--gap);
+}
+#prm_header {
+  height: max-content;
+  flex: 0 0 100%;
+}
+#prm_header p {
+  font-size: x-large;
+}
+#prm_header a {
+  font-size: large;
+  text-decoration: underline;
+  margin: 0 10px;
+}
+.section_header_holder {
+  margin: 8px auto 0;
+  display: block;
+  padding: 10px;
+  flex-basis: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background-color: var(--color-black-430);
+}
+#prm_section_1,
+#prm_section_2,
+#prm_section_5,
+#prm_section_6 {
+  flex: 1;
+}
+#prm_buttons_holder {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-flow: row wrap;
+}
+#prm_buttons_holder .reset_holder {
+  flex-basis: 100%;
+  text-align: right;
+}
+#prm_wrapper .section_header.center {
+  font-size: 17pt;
+  display: block;
+  width: calc(100% + 20px);
+  text-align: center;
+  margin: -10px -10px 0;
+  background-color: var(--color-primary-700);
+  padding: 4px 0;
+}
+#prm_wrapper .config_var {
+  width: 100%;
+  margin-top: 5px;
+  font-size: medium;
+}
+#prm_wrapper .config_var input,
+#prm_wrapper .config_var select {
+  margin-right: 10px;
+}
+#prm_wrapper .config_var input[type=text] {
+  background-color: var(--color-black-440);
+  padding: 2px;
+  border: solid 1px black;
+  border-radius: 7px;
+  padding: 4px;
+  width: 30%;
+}
+#prm_wrapper input[type=button],
+#prm_wrapper button {
+  background-color: var(--color-black-440);
+  color: var(--color-black-700);
+  transition: background-color 200ms ease-out, filter 200ms, color 200ms;
+  padding: 0px 20px;
+  vertical-align: middle;
+  box-sizing: border-box;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 32px;
+  font-weight: 500;
+  max-width: 100%;
+  text-wrap: balance;
+}
+#prm_buttons_holder button {
+  background-color: var(--color-black-300);
+}
+#prm_wrapper input[type=button]:hover {
+  background-color: var(--color-black-500);
+}
+#prm_wrapper input[type=checkbox] {
+  margin-right: 10px;
+  width: 1.25em;
+  height: 1.25em;
+}
+#prm_wrapper select {
+  background-color: var(--color-black-440);
+  color: var(--color-black-700);
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  outline: none;
+}
+#prm_section_3 .config_var {
+  display: inline-block;
+  width: calc(100%/7);
+  min-width: max-content;
+  padding: 0 5px;
+  text-align: center;
+}
+#prm_section_5 .config_var input[type=text] {
+  width: 30em;
+  max-width: 100%;
+}
+@media only screen and (max-width: 768px)  {
+  #prm {
+    width: unset !important;
+    height: unset !important;
+    left: 10px !important;
+    right: 10px !important;
+    top: 10px !important;
+    bottom: 10px !important;
   }
   #prm_section_1,
-  #prm_section_2 {
-    flex: 1;
+  #prm_section_2,
+  #prm_section_5,
+  #prm_section_6  {
+    flex: unset;
   }
-  #prm_buttons_holder {
-    flex-basis: 100%;
-    display: flex;
-    justify-content: flex-end;
-    gap: 5px;
-    flex-flow: row wrap;
+  #prm_section_5 {
+    display: none;
   }
-  #prm_buttons_holder .reset_holder {
-    flex-basis: 100%;
-    text-align: right;
+  #prm .config_var {
+    margin-bottom: 20px;
   }
-  #prm_wrapper .section_header.center {
-    font-size: large;
-    display: block;
-    width: calc(100% + 20px);
-    text-align: center;
-    margin: -10px -10px 0;
-    background-color: var(--color-primary-700);
-    padding: 2px 0;
+  #prm .config_var:last-child {
+    margin-bottom: unset;
   }
-  #prm_wrapper .config_var {
-    width: 100%;
-    margin-top: 5px;
-    font-size: medium;
+}  /* Notifications */
+@keyframes rpm-notification-intro {
+  from {
+    translate: -100%;
   }
-  #prm_wrapper .config_var input,
-  #prm_wrapper .config_var select {
-    margin-right: 10px;
+  to {
+    translate: 0%;
   }
-  #prm_wrapper .config_var input[type=text] {
-    background-color: var(--color-black-440);
-    padding: 2px;
-    border: solid 1px black;
-    border-radius: 7px;
-    padding: 4px;
-    width: 30%;
-  }
-  #prm_wrapper input[type=button],
-  #prm_wrapper button {
-    background-color: var(--color-black-440);
-    color: var(--color-black-700);
-    transition: background-color 200ms ease-out, filter 200ms, color 200ms;
-    padding: 0px 20px;
-    vertical-align: middle;
-    box-sizing: border-box;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 32px;
-    font-weight: 500;
-    max-width: 100%;
-    text-wrap: balance;
-  }
-  #prm_buttons_holder button {
-    background-color: var(--color-black-300);
-  }
-  #prm_wrapper input[type=button]:hover {
-    background-color: var(--color-black-500);
-  }
-  #prm_wrapper input[type=checkbox] {
-    margin-right: 10px;
-    width: 1.25em;
-    height: 1.25em;
-  }
-  #prm_wrapper select {
-    background-color: var(--color-black-440);
-    color: var(--color-black-700);
-    border: none;
-    padding: 5px 10px;
-    border-radius: 5px;
-    outline: none;
-  }
-  #prm_section_3 .config_var {
-    display: inline-block;
-    width: calc(100%/7);
-    min-width: max-content;
-    padding: 0 5px;
-    text-align: center;
-  }
-  #prm_section_5 .config_var input[type=text] {
-    width: 30em;
-    max-width: 100%;
-  }
-  @media only screen and (max-width: 768px)  {
-    #prm {
-      width: unset !important;
-      height: unset !important;
-      left: 10px !important;
-      right: 10px !important;
-      top: 10px !important;
-      bottom: 10px !important;
-    }
-    #prm_section_1,
-    #prm_section_2 {
-      flex: unset;
-    }
-    #prm .config_var {
-      margin-bottom: 20px;
-    }
-    #prm .config_var:last-child {
-      margin-bottom: unset;
-    }
-  }  /* Notifications */
-  @keyframes rpm-notification-intro {
-    from {
-      translate: -100%;
-    }
-    to {
-      translate: 0%;
-    }
-  }
-  /* Themes */.rpm-theme-picker {
-    flex: 1 0 0px;
-  }
-  .rpm-theme-picker:after {
-    content: attr(data-name)
-  }
-  .theme-picker__buttons {
-    flex-wrap: wrap;
-    flex-direction: row;
-    gap: 10px;
-    justify-content: center;
-  }
-  .theme-picker__button {
-    min-width: fit-content;
-    max-width: max-content;
-  }
-  .theme-picker__button[data-type="default"] {
-    max-width: unset;
-    width: 35px;
-  }
-  /* SUNSET GLOW */.rpm-theme-picker[data-type="sunset-glow"] {
-    background: linear-gradient(135deg, #6b1d52, #b02e78, #f77fba);
-    border: 2px solid #8e2465;
-    border-radius: 8px;
-    transition: transform 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="sunset-glow"]:hover {
-    transform: scale(1.1);
-  }
-  html[data-theme="sunset-glow"] {
-    --color-primary-900: #6b1d52;
-    --color-primary-800: #8e2465;
-    --color-primary-700: #b02e78;
-    --color-primary-500: #d14791;
-    --color-primary-400: #f77fba;
-    --color-primary-200: #fbc8e4;
-    --color-primary-100: #fdeaf4;
-  }
-  /* OCEAN BREEZE */.rpm-theme-picker[data-type="ocean-breeze"] {
-    background: linear-gradient(135deg, #012a4a, #014f86, #61a5c2);
-    border: 2px solid #013a63;
-    border-radius: 50%;
-    transition: transform 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="ocean-breeze"]:hover {
-    transform: scale(1.1);
-  }
-  html[data-theme="ocean-breeze"] {
-    --color-primary-900: #012a4a;
-    --color-primary-800: #013a63;
-    --color-primary-700: #014f86;
-    --color-primary-500: #2a6f97;
-    --color-primary-400: #61a5c2;
-    --color-primary-200: #a9d6e5;
-    --color-primary-100: #d9f1f6;
-  }
-  /* FOREST */.rpm-theme-picker[data-type="forest-whisper"] {
-    background: linear-gradient(135deg, #143601, #275d03, #63b530);
-    border: 2px solid #1c4a02;
-    border-radius: 8px;
-    transition: transform 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="forest-whisper"]:hover {
-    transform: scale(1.1);
-  }
-  html[data-theme="forest-whisper"] {
-    --color-primary-900:rgb(27, 68, 3);
-    --color-primary-800:rgb(32, 80, 4);
-    --color-primary-700:rgb(72, 170, 7);
-    --color-primary-500: #398d05;
-    --color-primary-400: #63b530;
-    --color-primary-200: #a9e8a4;
-    --color-primary-100:rgb(227, 248, 227);
-  }
-  /* LAVENDER DREAMS */.rpm-theme-picker[data-type="lavender-dreams"] {
-    background: linear-gradient(135deg, #4c1d6f, #70308e, #cfa5e0);
-    border: 2px solid #5e267e;
-    border-radius: 50%;
-    transition: transform 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="lavender-dreams"]:hover {
-    transform: scale(1.1);
-  }
-  html[data-theme="lavender-dreams"] {
-    --color-primary-900:rgb(141, 92, 179);
-    --color-primary-800:rgb(117, 57, 151);
-    --color-primary-700:rgb(132, 73, 160);
-    --color-primary-500: #9b5cb2;
-    --color-primary-400: #cfa5e0;
-    --color-primary-200:rgb(236, 223, 245);
-    --color-primary-100: #f7ecfc;
-  }
-  /* FIRE EMBER */.rpm-theme-picker[data-type="fire-ember"] {
-    background: linear-gradient(135deg, #7f1d1d, #b91c1c, #f87171);
-    border: 2px solid #991b1b;
-    border-radius: 8px;
-    transition: transform 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="fire-ember"]:hover {
-    transform: scale(1.1);
-  }
-  html[data-theme="fire-ember"] {
-    --color-primary-900:rgb(145, 42, 42);
-    --color-primary-800:rgb(172, 42, 42);
-    --color-primary-700:rgb(211, 32, 32);
-    --color-primary-500:rgb(241, 62, 62);
-    --color-primary-400:rgb(252, 138, 138);
-    --color-primary-200:rgb(253, 185, 185);
-    --color-primary-100: #fee2e2;
-  }
-
-  /* POLKA (mosaic before) */
-  html[data-theme="mosaic"] .app {
-    background-image:  radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px), radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px);
-    background-repeat: repeat;
-    background-size: 66px 66px;
-    background-position: 0 0, 33px 33px;
-  }
-
-  .rpm-theme-picker[data-type="mosaic"] {
-    background-image:  radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px), radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, rgba(0, 0, 0, 0.1) 1.3px);
-    background-repeat: repeat;
-    background-size: 10px 10px;
-    background-position: 0 0, 5px 5px;
-    border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-  .rpm-theme-picker[data-type="mosaic"]:after {
-    color: var(--color-black-800);
-  }
-  .rpm-theme-picker[data-type="mosaic"]:hover {
-    transform: scale(1.1);
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
-  }
-
-
-  
-  /* WHITE TEXT */
-  html[data-theme="lavender-dreams"] .achievements-progress__bar,
-  html[data-theme="fire-ember"] .achievements-progress__bar, 
-  html[data-theme="forest-whisper"] .achievements-progress__bar,
-  html[data-theme="ocean-breeze"] .achievements-progress__bar,
-  html[data-theme="sunset-glow"] .achievements-progress__bar {
-    color: white;
-  }
-  `;
+}  /* Themes */
+.rpm-theme-picker {
+  flex: 1 0 0px;
+}
+.rpm-theme-picker:after {
+  content: attr(data-name)
+}
+.theme-picker__buttons {
+  flex-wrap: wrap;
+  flex-direction: row;
+  gap: 10px;
+  justify-content: center;
+}
+.theme-picker__button {
+  min-width: fit-content;
+  max-width: max-content;
+}
+.theme-picker__button[data-type="default"] {
+  max-width: unset;
+  width: 35px;
+}  /* SUNSET GLOW */
+.rpm-theme-picker[data-type="sunset-glow"] {
+  background: linear-gradient(135deg, #6b1d52, #b02e78, #f77fba);
+  border: 2px solid #8e2465;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+.rpm-theme-picker[data-type="sunset-glow"]:hover {
+  transform: scale(1.1);
+}
+html[data-theme="sunset-glow"] {
+  --color-primary-900: #6b1d52;
+  --color-primary-800: #8e2465;
+  --color-primary-700: #b02e78;
+  --color-primary-500: #d14791;
+  --color-primary-400: #f77fba;
+  --color-primary-200: #fbc8e4;
+  --color-primary-100: #fdeaf4;
+}  /* OCEAN BREEZE */
+.rpm-theme-picker[data-type="ocean-breeze"] {
+  background: linear-gradient(135deg, #012a4a, #014f86, #61a5c2);
+  border: 2px solid #013a63;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+.rpm-theme-picker[data-type="ocean-breeze"]:hover {
+  transform: scale(1.1);
+}
+html[data-theme="ocean-breeze"] {
+  --color-primary-900: #012a4a;
+  --color-primary-800: #013a63;
+  --color-primary-700: #014f86;
+  --color-primary-500: #2a6f97;
+  --color-primary-400: #61a5c2;
+  --color-primary-200: #a9d6e5;
+  --color-primary-100: #d9f1f6;
+}  /* FOREST */
+.rpm-theme-picker[data-type="forest-whisper"] {
+  background: linear-gradient(135deg, #143601, #275d03, #63b530);
+  border: 2px solid #1c4a02;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+.rpm-theme-picker[data-type="forest-whisper"]:hover {
+  transform: scale(1.1);
+}
+html[data-theme="forest-whisper"] {
+  --color-primary-900:rgb(27, 68, 3);
+  --color-primary-800:rgb(32, 80, 4);
+  --color-primary-700:rgb(72, 170, 7);
+  --color-primary-500: #398d05;
+  --color-primary-400: #63b530;
+  --color-primary-200: #a9e8a4;
+  --color-primary-100:rgb(227, 248, 227);
+}  /* LAVENDER DREAMS */
+.rpm-theme-picker[data-type="lavender-dreams"] {
+  background: linear-gradient(135deg, #4c1d6f, #70308e, #cfa5e0);
+  border: 2px solid #5e267e;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+.rpm-theme-picker[data-type="lavender-dreams"]:hover {
+  transform: scale(1.1);
+}
+html[data-theme="lavender-dreams"] {
+  --color-primary-900:rgb(141, 92, 179);
+  --color-primary-800:rgb(117, 57, 151);
+  --color-primary-700:rgb(132, 73, 160);
+  --color-primary-500: #9b5cb2;
+  --color-primary-400: #cfa5e0;
+  --color-primary-200:rgb(236, 223, 245);
+  --color-primary-100: #f7ecfc;
+}  /* FIRE EMBER */
+.rpm-theme-picker[data-type="fire-ember"] {
+  background: linear-gradient(135deg, #7f1d1d, #b91c1c, #f87171);
+  border: 2px solid #991b1b;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+.rpm-theme-picker[data-type="fire-ember"]:hover {
+  transform: scale(1.1);
+}
+html[data-theme="fire-ember"] {
+  --color-primary-900:rgb(145, 42, 42);
+  --color-primary-800:rgb(172, 42, 42);
+  --color-primary-700:rgb(211, 32, 32);
+  --color-primary-500:rgb(241, 62, 62);
+  --color-primary-400:rgb(252, 138, 138);
+  --color-primary-200:rgb(253, 185, 185);
+  --color-primary-100: #fee2e2;
+}  /* POLKA (mosaic before) */
+html[data-theme="mosaic"] .app {
+  background-image:  radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px), radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px);
+  background-repeat: repeat;
+  background-size: 66px 66px;
+  background-position: 0 0, 33px 33px;
+}
+.rpm-theme-picker[data-type="mosaic"] {
+  background-image:  radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, transparent 1.3px), radial-gradient(rgba(68, 77, 247, 0.5) 1.3px, rgba(0, 0, 0, 0.1) 1.3px);
+  background-repeat: repeat;
+  background-size: 10px 10px;
+  background-position: 0 0, 5px 5px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.rpm-theme-picker[data-type="mosaic"]:after {
+  color: var(--color-black-800);
+}
+.rpm-theme-picker[data-type="mosaic"]:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+}  /* WHITE TEXT */
+html[data-theme="lavender-dreams"] .achievements-progress__bar,
+html[data-theme="fire-ember"] .achievements-progress__bar,
+html[data-theme="forest-whisper"] .achievements-progress__bar,
+html[data-theme="ocean-breeze"] .achievements-progress__bar,
+html[data-theme="sunset-glow"] .achievements-progress__bar {
+  color: white;
+}
+/* MINI PROFILE */.rpm-mini-profile-note {
+  resize: none;
+}
+.rpm-powered {
+  text-align: right;
+  display: inline-block;
+  width: 100%;
+  font-size: 0.8em;
+  opacity: 80%;
+}
+.rpm-gollum-stats {
+  width: 100%;
+  padding: 15px;
+}
+.rpm-gollum-stats > * {
+  margin-bottom: 10px;
+}
+.rpm-gollum-stats > *:last-child {
+  margin-bottom: unset;
+}
+.rpm-tags p {
+  width: 100%;
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+.rpm-tags-list {
+  justify-content: space-evenly;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.rpm-clickable {
+  cursor: pointer;
+}
+.rpm-tags-tag {
+  background: var(--color-primary-200);
+  padding: 0.05em 0.6em;
+  border-radius: 10px;
+}
+.mini-profile[rpm-affected] {
+  width: 400px;
+}
+.rpm-last-comments-container {
+  max-height: 150px;
+  overflow: scroll;
+}
+.rpm-comment-no-js .comment__tools,
+.rpm-comment-no-js .comment-toggle-children,
+.rpm-comment-no-js .comment__controls,
+.rpm-comment-no-js .comment-hidden-group {
+  display: none;
+}
+.rpm-last-comments > p {
+  font-weight: bold;
+  text-align: center;
+}
+.rpm-last-comments > button {
+  width: 100%;
+  text-align: center;
+}
+.rpm-last-comments-container {
+  max-height: 400px;
+  height: 200px;
+  resize: vertical;
+  min-height: 50px;
+  border-radius: 15px;
+  margin-bottom: 10px;
+}
+section .rpm-last-comments-container {
+  height: 500px;
+  max-height: unset;
+}
+.rpm-comment-container {
+  border-radius: 15px;
+  background: var(--color-black-430);
+  margin-bottom: 7px;
+  padding: 5px 1em;
+  overflow: hidden;
+}
+.rpm-comment-container > a {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-bottom: 5px;
+}
+.rpm-comment-preview {
+  text-align: center;
+}
+.rpm-highlight-comment > .comment__body  {
+  border: 3px dotted var(--color-primary-400);
+  border-radius: 10px;
+}
+.rpm-comment-container > .comment,
+.rpm-comment-container > .comments {
+  background: var(--color-bright-900);
+  border-radius: 15px;
+  padding: 0 5px;
+}
+`;
 
 
 let enableFilters = null;
@@ -1440,7 +1772,7 @@ async function handleOldConfigFields() {
 
   if ('unrollCommentariesAutomatically' in config) {
     if (config.unrollCommentariesAutomatically) {
-      config['unrollCommentatries'] = SettingEnums.UnrollComments.AUTO_UNROLL;
+      config.unrollCommentaries = SettingEnums.UnrollComments.AUTO_UNROLL;
     }
     delete config.unrollCommentariesAutomatically;
   }
@@ -1658,6 +1990,61 @@ async function handleConfig() {
           }
         }
       },
+
+      // НАСТРОЙКИ МИНИ-ПРОФИЛЕЙ
+      miniProfileEditableNote: {
+        section: ["Настройки мини-профилей", "Дополнительные функции в мини-профилей пользователей, которые появляются при наведении на их ник."],
+        type: "checkbox",
+        default: true,
+        label:
+          "Редактирование заметки"
+      },
+      miniProfileStoryTags: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Основные теги постов пользователя"
+      },
+      miniProfileСommentTags: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Основные теги постов, где пользователь оставляет комментарии"
+      },
+      miniProfileСomments: {
+        type: "checkbox",
+        default: false,
+        label:
+          "Последние комментарии пользователя"
+      },
+
+      miniProfileAutoloadTags: {
+        type: "checkbox",
+        default: false,
+        label:
+          "Автозагрузка тегов"
+      },
+
+      // СТРАНИЦА ПОЛЬЗОВАТЕЛЯ
+      profileStoryTags: {
+        section: ["Настройки профилей пользователей", "То же самое, но только на странице профиля"],
+        type: "checkbox",
+        default: true,
+        label:
+          "Основные теги постов пользователя"
+      },
+      profileСommentTags: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Основные теги постов, где пользователь оставляет комментарии"
+      },
+      profileСomments: {
+        type: "checkbox",
+        default: true,
+        label:
+          "Последние комментарии пользователя"
+      },
   
       // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
       filteringPageRegex: {
@@ -1757,7 +2144,7 @@ function error(...args: any): void {
   }
 }
 
-const waitConfig = new Promise<void>((resolve) => {
+const waitConfig = () => new Promise<void>((resolve) => {
   let isInit = () => setTimeout(() => (isConfigInit ? resolve() : isInit()), 1);
   isInit();
 });
@@ -2543,6 +2930,141 @@ function setTheme(theme: string) {
   updateTheme();
 }
 
+type GollumTagsType = "PostTags" | "CommentTags";
+function createGollumTagsGetter(tagsType: GollumTagsType) {
+  return async (userId: number) => {
+    const response = await fetch(`https://gollum.space/api/${userId}-${tagsType}`);
+    const data: Object = await response.json();
+
+    return Object.values(data).map(x => x.TagRU);
+  }
+}
+
+const getGollumStoryTags = createGollumTagsGetter("PostTags");
+const getGollumCommentTags = createGollumTagsGetter("CommentTags");
+
+
+let csrfToken = null;
+async function requestCsrfToken() {
+  if (csrfToken !== null) return csrfToken;
+
+  const appConfig = JSON.parse(document.querySelector('.app__config').textContent);
+  csrfToken = appConfig.csrfToken;
+  return csrfToken;
+}
+
+const newNotes = new Map<number, string>();
+function handleMiniProfile(element: HTMLDivElement) {
+  if (element.hasAttribute('rpm-affected'))
+    return;
+
+  element.setAttribute('rpm-affected', '');
+
+  const userId = parseInt(element.getAttribute('data-user-id'));
+  const userName = element.querySelector('.pkb-profile-username h2').textContent;
+
+  function updateNoteElement() {
+    let note = newNotes.get(userId);
+    const pkbNoteElem = element.querySelector('.mini-profile__note');
+    if (pkbNoteElem) {
+      if (note === undefined || note === null)
+        note = pkbNoteElem.textContent;
+      pkbNoteElem.remove();
+    }
+
+    const noteElem = document.createElement('div');
+    noteElem.classList.add('input__box', 'mini-profile__note');
+
+    const textareaElem = document.createElement('textarea');
+    textareaElem.classList.add('input__input', 'profile-note__textarea', 'rpm-mini-profile-note');
+    textareaElem.setAttribute('rows', '1');
+    textareaElem.setAttribute('placeholder', 'Заметка об этом пользователе будет видна только вам. Нажмите, чтобы ввести текст.');
+    textareaElem.value = note ?? '';
+
+    noteElem.append(textareaElem);
+
+    const mainElem = element.querySelector('.mini-profile__main');
+    mainElem.append(noteElem);
+
+    const rpmPoweredElem = RPM.Nodes.createPoweredNote('Улучшено с помощью Return Pikabu minus');
+    mainElem.append(rpmPoweredElem)
+
+
+    let saved = true;
+    async function save() {
+      saved = true;
+      newNotes.set(userId, note);
+
+      const action = note !== '' ? 'note+' : 'note-';
+      await fetch('/ajax/users_actions.php', {
+        method: 'POST',
+        headers: {
+          "X-Csrf-Token": await requestCsrfToken(),
+          "Accept": "application/json, text/javascript, */*; q=0.01",
+          "X-Requested-With": "XMLHttpRequest",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "Priority": "u=0"
+        },
+        body: `id=${userId}&action=${encodeURIComponent(action)}&message=${encodeURIComponent(note)}`
+      })
+
+      sendNotification('Успешно', 'Заметка сохранена')
+    }
+
+    let timeout = null;
+
+    textareaElem.addEventListener('input', () => {
+      saved = false;
+      note = textareaElem.value;
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+      timeout = setTimeout(save, 1500);
+    });
+    textareaElem.addEventListener('blur', () => {
+      if (timeout !== null && !saved) {
+        clearTimeout(timeout);
+        timeout = null;
+        save();
+      }
+    });
+  }
+
+  function gollumIntegration() {
+    const main = document.createElement('div');
+    main.classList.add('rpm-gollum-stats');
+
+    let worked = false;
+    if (GM_config.get('miniProfileStoryTags')) {
+      const storyTagsElem = RPM.Nodes.createTagsContainer(userId, 'Теги постов', getGollumStoryTags, GM_config.get('miniProfileAutoloadTags') as boolean);
+      main.append(storyTagsElem);
+      worked = true;
+    }
+    if (GM_config.get('miniProfileСommentTags')) {
+      const commentsTagsElem = RPM.Nodes.createTagsContainer(userId, 'Теги комментариев', getGollumCommentTags, GM_config.get('miniProfileAutoloadTags') as boolean);
+      main.append(commentsTagsElem);
+      worked = true;
+    }
+    if (GM_config.get('miniProfileСomments')) {
+      const lastComments = RPM.Nodes.createLastCommentsSection(userName, 3);
+      main.append(lastComments);
+      worked = true;
+    }
+
+    if (worked) {
+      const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName}-summary" target="_blank">gollum.space</a>`);
+      main.append(poweredElem)
+    }
+
+    element.append(main);
+  }
+
+  if (GM_config.get('miniProfileEditableNote')) {
+    updateNoteElement();
+  }
+  gollumIntegration();
+}
+
 
 function mutationsListener(
   mutationList: MutationRecord[],
@@ -2564,15 +3086,21 @@ function mutationsListener(
           processStory(storyElem, false);
         } else if (node.matches(".comment__more:not(.rpm-unroll-all)")) {
           commentMoreBtn()
-        }
-        if (node.matches('.overlay')) {
+        } else if (node.matches('.overlay')) {
           info('Поймал .overlay!');
           
           (async () => {
-            const e = await waitForElement('.overlay .theme-picker__popup')
-            info('Поймал селектор типов!')
-            appendCustomThemesUi(e as any);
+            const e = await waitForElement('.theme-picker__popup, .mini-profile', 1500, node) as HTMLDivElement;
+            if (e.matches('.mini-profile')) {
+              info('Поймал мини-профиль!', e)
+              handleMiniProfile(e as any);
+            } else {
+              info('Поймал селектор типов!')
+              appendCustomThemesUi(e as any);
+            }
           })();
+        } else if (node.matches('.mini-profile')) {
+          handleMiniProfile(node as any);
         }
       }
     }
@@ -2720,10 +3248,10 @@ async function processTabs() {
     experts: 'expertsTab'
   };
 
-  await waitForElement('.header-menu__item');
+  await waitForElement('.header-menu__item, .pkb-tab-list');
 
   Object.entries(tabConfig).forEach(([key, field]) => {
-    const selector = `.header-menu__item[data-feed-key="${key}"]`;
+    const selector = `.header-menu__item[data-feed-key="${key}"], .pkb-tab[data-feed-key="${key}"]`;
 
     if (!GM_config.get(field)) {
       const element = document.querySelector(selector);
@@ -2738,15 +3266,23 @@ function init() {
   updateTheme();
   addCss(STYLES);
 
-  window.addEventListener("DOMContentLoaded", main);
+  observer = new MutationObserver(mutationsListener);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
   window.addEventListener("load", onLoad);
+
+  waitConfig().then(onConfig)
+
+  if (window.location.pathname.startsWith('/@')) {
+    onUserProfilePage()
+  }
 }
 
-async function main() {
-  updateTheme();
-  await waitConfig;
-  updateTheme();
-
+async function onConfig() {
+  processTabs();
   if (GM_config.get('uuid')) {
     delete GM_config.fields['registerRpm'];
   }
@@ -2788,17 +3324,49 @@ function commentMoreBtn() {
 
 async function onLoad() {
   updateTheme();
-  processTabs();
-  observer = new MutationObserver(mutationsListener);
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
 
   processStories(document.querySelectorAll("article.story"));
 
   if (!supportMenuCommands)
     addSettingsOpenButton();
+}
+
+async function onUserProfilePage() {
+  const userName = document.querySelector('.page-profile .profile__nick').textContent;
+  const userId = parseInt(document.querySelector('.page-profile .profile').getAttribute('data-user-id'));
+
+  const feedPanel = document.querySelector('.feed-panel, .user-filters');
+
+  let lastSection = null;
+
+  await waitConfig();
+  if (GM_config.get('profileStoryTags')) {
+    const section = document.createElement('section');
+    section.append(RPM.Nodes.createTagsContainer(userId, 'Теги постов', getGollumStoryTags, true));
+    feedPanel.parentElement.insertBefore(section, feedPanel);
+    lastSection = section;
+  }
+
+  if (GM_config.get('profileСommentTags')) {
+    const section = document.createElement('section');
+    section.append(RPM.Nodes.createTagsContainer(userId, 'Теги комментариев', getGollumCommentTags, true));
+    feedPanel.parentElement.insertBefore(section, feedPanel);
+    lastSection = section;
+  }
+
+  if (GM_config.get('profileСomments')) {
+    const section = document.createElement('section');
+    section.append(RPM.Nodes.createLastCommentsSection(userName, 3))
+    feedPanel.parentElement.insertBefore(section, feedPanel);
+    lastSection = section;
+  }
+
+  // Powered
+  if (lastSection !== null) {
+    const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName}-summary" target="_blank">gollum.space</a>`);
+    const rpmPoweredElem = RPM.Nodes.createPoweredNote('Работает с помощью Return Pikabu minus');
+    lastSection.append(poweredElem, rpmPoweredElem);
+  }
 }
 
 init();
