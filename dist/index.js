@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.9
+// @version      0.9.1
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -9,6 +9,7 @@
 // @connect      pikabu.ru
 // @connect      rpm.pyxiion.ru
 // @connect      gollum.space
+// @connect      isla-de-muerta.com
 // @grant        GM.xmlHttpRequest
 // @grant        GM.getValue
 // @grant        GM.setValue
@@ -211,11 +212,12 @@ function MD5(string) {
     return temp.toLowerCase();
 }
 class AbstractHttpRequest {
-    constructor(url) {
+    constructor(url, responseType) {
         this.url = url;
         this.httpMethod = "POST";
         this.headers = new Map();
         this.timeout = 15000;
+        this.responseType = responseType;
     }
     addHeader(key, value) {
         this.headers.set(key, value);
@@ -232,19 +234,22 @@ class AbstractHttpRequest {
             headers: Object.fromEntries(this.headers),
             data: JSON.stringify(this.getData()),
             timeout: this.timeout,
-            responseType: "json",
+            responseType: this.responseType,
             onerror: callback.onError,
             onload: callback.onSuccess,
             // TODO: ontimeout
+            onabort: callback.onError,
+            ontimeout: callback.onError
         };
         details.anonymous = true;
+        details.fetch = true;
         GM.xmlHttpRequest(details);
     }
     executeAsync() {
         const promise = new Promise((resolve, reject) => {
             this.execute({
                 onError: reject,
-                onSuccess: resolve,
+                onSuccess: resolve
             });
         });
         promise.catch(error);
@@ -252,9 +257,8 @@ class AbstractHttpRequest {
     }
 }
 class HttpRequest extends AbstractHttpRequest {
-    constructor(url, method = "GET") {
-        super(url);
-        this.addHeader("Content-Type", "application/json");
+    constructor(url, method = "GET", responseType) {
+        super(url, responseType);
         this.httpMethod = method;
     }
     setBody(body) {
@@ -280,7 +284,7 @@ var Pikabu;
     API.COOKIE = "unqKms867=aba48a160c; rm5bH=8c68fbfe3dc5e5f5b23a9ec1a8f784f8";
     class Request extends AbstractHttpRequest {
         constructor(domain, controller, params) {
-            super(domain + controller);
+            super(domain + controller, "json");
             this.controller = controller;
             this.params = params;
             this.setHttpMethod("GET");
@@ -499,13 +503,14 @@ var RPM;
         }
         Service.voteUser = voteUser;
         async function post(url, json) {
-            const request = new HttpRequest(url, "POST");
+            const request = new HttpRequest(url, "POST", "json");
+            request.addHeader("Content-Type", "application/json");
             request.setBody(json);
             const response = await request.executeAsync();
             return response.response;
         }
         async function get(url) {
-            const request = new HttpRequest(url, "GET");
+            const request = new HttpRequest(url, "GET", "json");
             const response = await request.executeAsync();
             return response.response;
         }
@@ -621,24 +626,71 @@ var RPM;
         let LastComments;
         (function (LastComments) {
             const CHUNK_SIZE = 5;
+            const COMMENT_UP_DEPTH = 1;
+            const COMMENT_DOWN_DEPTH = 2;
             const parser = new DOMParser();
-            async function loadCommentFromPikabu(info, parent = false) {
-                // const response = await fetch(commentLink);
-                const request = new HttpRequest(info.link);
+            async function loadCommentFromPikabu(info, parent = false, disableMiniProfile = false) {
+                const request = new HttpRequest(info.link, "GET", "arraybuffer");
+                request.addHeader('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0');
                 const response = await request.executeAsync();
-                const htmlDoc = parser.parseFromString(response.responseText, 'text/html');
+                // Ебал я этот ваш Пикабу, нахуя он использует CP1251
+                const buffer = response.response;
+                const dec = new TextDecoder('windows-1251');
+                const body = dec.decode(new Uint8Array(buffer));
+                const htmlDoc = parser.parseFromString(body, 'text/html');
                 const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
-                const commentElem = htmlDoc.getElementById(`comment_${info.id}`);
-                commentElem.classList.add('rpm-highlight-comment');
                 const clone = wantedElem.cloneNode(true);
-                postprocessPikabuComment(clone);
+                postprocessPikabuComment(clone, info.id, disableMiniProfile);
                 return clone;
             }
-            function postprocessPikabuComment(element) {
+            function postprocessPikabuComment(element, commentId, disableMiniProfile = false) {
                 element.classList.add('rpm-comment-no-js');
-                element.querySelectorAll('.comment__user').forEach((x) => {
-                    x.removeAttribute('data-profile');
+                element.querySelectorAll('.comment').forEach(x => {
+                    x.classList.add(x.getAttribute('id'));
+                    x.removeAttribute('id');
+                    // Fix comment toggling
+                    const children = x.querySelector(':scope > .comment__children');
+                    const toggle = x.querySelector(':scope > .comment-toggle-children');
+                    if (children && toggle) {
+                        toggle.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            children.toggleAttribute('hidden');
+                            toggle.classList.toggle('comment-toggle-children_collapse');
+                        });
+                    }
                 });
+                const commentElem = element.querySelector(`.comment_${commentId}`);
+                commentElem.classList.add('rpm-highlight-comment');
+                const children = commentElem.querySelector(':scope > .comment__children');
+                const toggle = commentElem.querySelector(':scope > .comment-toggle-children');
+                children.toggleAttribute('hidden');
+                toggle.classList.toggle('comment-toggle-children_collapse');
+                // Depth control
+                commentElem.querySelectorAll(':scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
+                    x.remove();
+                });
+                let parent = commentElem;
+                for (let i = 0; i < COMMENT_UP_DEPTH; ++i) {
+                    const nextParent = parent.parentElement;
+                    if (nextParent && nextParent.matches('.comment__children') && nextParent.parentElement.matches('.comment')) {
+                        // remove neighbours
+                        for (const child of nextParent.children) {
+                            if (child !== parent)
+                                child.remove();
+                        }
+                        parent = nextParent.parentElement;
+                    }
+                    else {
+                        break;
+                    }
+                }
+                if (parent !== element && parent.parentElement !== null)
+                    parent.replaceWith(commentElem);
+                if (disableMiniProfile) {
+                    element.querySelectorAll('.comment__user').forEach((x) => {
+                        x.removeAttribute('data-profile');
+                    });
+                }
                 element.querySelectorAll('img').forEach((x) => {
                     if (x.hasAttribute('data-src')) {
                         x.src = x.getAttribute('data-src');
@@ -646,7 +698,7 @@ var RPM;
                     }
                 });
             }
-            function createCommentContainer(info, autoload = false) {
+            function createCommentContainer(info, autoload, disableMiniProfile) {
                 const container = document.createElement('div');
                 container.classList.add('rpm-comment-container');
                 const title = document.createElement('a');
@@ -656,7 +708,7 @@ var RPM;
                 const loadFull = async () => {
                     const icon = createLoadingIcon();
                     preview.replaceWith(icon);
-                    const pikabuComment = await loadCommentFromPikabu(info, true);
+                    const pikabuComment = await loadCommentFromPikabu(info, true, disableMiniProfile);
                     icon.replaceWith(pikabuComment);
                 };
                 const preview = createCommentPreview(info, loadFull);
@@ -676,8 +728,14 @@ var RPM;
                 return container;
             }
             async function loadCommentsFromGollum(userName) {
-                const response = await fetch(`https://gollum.space/user/${userName}-last`);
-                const htmlDoc = parser.parseFromString(await response.text(), 'text/html');
+                // const response = await fetch(`https://gollum.space/user/${userName}-last`);
+                const request = new HttpRequest(`https://gollum.space/user/${userName}-last`, "GET", "document");
+                const response = await request.executeAsync();
+                // const buffer = response.response as ArrayBuffer;
+                // const dec = new TextDecoder('utf-8');
+                // const body = dec.decode(buffer);
+                // const htmlDoc = parser.parseFromString(body, 'text/html');
+                const htmlDoc = response.response;
                 const comments = Array.from(htmlDoc.querySelectorAll('.comment-block'));
                 return comments.map(elem => {
                     const anchor = elem.querySelector('.comment-link');
@@ -691,20 +749,23 @@ var RPM;
                     };
                 });
             }
-            function createLastCommentsSection(userName, autoloadCount = 0) {
+            function createLastCommentsSection(userName, autoloadGollum = false, autoloadCount = 0, disableMiniProfile = false) {
                 const main = document.createElement('div');
                 main.classList.add('rpm-last-comments');
                 const title = document.createElement('h4');
                 title.textContent = 'Последние комментарии';
                 const containerOfComments = document.createElement('div');
                 containerOfComments.classList.add('rpm-last-comments-container');
-                const loadingIcon = createLoadingIcon();
-                containerOfComments.append(loadingIcon);
                 const loadMoreBtn = document.createElement('button');
-                loadMoreBtn.textContent = 'Больше комментариев';
+                loadMoreBtn.textContent = 'Загрузить';
                 main.append(title, containerOfComments, loadMoreBtn);
                 async function* loadComments() {
+                    loadMoreBtn.textContent = 'Больше комментариев';
+                    const loadingIcon = createLoadingIcon();
+                    containerOfComments.append(loadingIcon);
+                    loadMoreBtn.style.display = 'none';
                     const comments = await loadCommentsFromGollum(userName);
+                    loadMoreBtn.style.display = '';
                     loadingIcon.remove();
                     if (comments.length === 0) {
                         containerOfComments.append('Комментарии не найдены.');
@@ -712,7 +773,7 @@ var RPM;
                     else {
                         let count = 0;
                         for (const comment of comments) {
-                            containerOfComments.append(createCommentContainer(comment, count < autoloadCount));
+                            containerOfComments.append(createCommentContainer(comment, count < autoloadCount, disableMiniProfile));
                             if (++count % CHUNK_SIZE == 0) {
                                 yield;
                             }
@@ -721,8 +782,11 @@ var RPM;
                     loadMoreBtn.remove();
                 }
                 const loader = loadComments();
-                loader.next();
-                loadMoreBtn.addEventListener('click', () => loader.next());
+                if (autoloadGollum)
+                    loader.next();
+                loadMoreBtn.addEventListener('click', () => {
+                    loader.next();
+                });
                 return main;
             }
             LastComments.createLastCommentsSection = createLastCommentsSection;
@@ -1471,7 +1535,6 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
   overflow: scroll;
 }
 .rpm-comment-no-js .comment__tools,
-.rpm-comment-no-js .comment-toggle-children,
 .rpm-comment-no-js .comment__controls,
 .rpm-comment-no-js .comment-hidden-group {
   display: none;
@@ -1486,14 +1549,13 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
 }
 .rpm-last-comments-container {
   max-height: 400px;
-  height: 200px;
+  height: max-content;
   resize: vertical;
-  min-height: 50px;
+  min-height: max-content;
   border-radius: 15px;
   margin-bottom: 10px;
 }
 section .rpm-last-comments-container {
-  height: 500px;
   max-height: unset;
 }
 .rpm-comment-container {
@@ -1515,12 +1577,14 @@ section .rpm-last-comments-container {
 .rpm-highlight-comment > .comment__body  {
   border: 3px dotted var(--color-primary-400);
   border-radius: 10px;
+  padding: 5px;
 }
 .rpm-comment-container > .comment,
 .rpm-comment-container > .comments {
-  background: var(--color-bright-900);
+  background: var(--color-bright-800);
   border-radius: 15px;
   padding: 0 5px;
+  padding-top: 5px;
 }
 `;
 let enableFilters = null;
@@ -1596,6 +1660,11 @@ async function handleConfig() {
                 default: 3,
                 label: "Минимальное количество оценок у поста или комментария для отображения соотношения плюсов и минусов. " +
                     "Установите на 0, чтобы всегда показывать.",
+            },
+            noLinkTracking: {
+                type: "checkbox",
+                default: true,
+                label: "Удалять трекеры с ссылок."
             },
             // НАСТРОЙКИ ПОСТОВ
             minStoryRating: {
@@ -1749,44 +1818,64 @@ async function handleConfig() {
                 section: ["Настройки мини-профилей", "Дополнительные функции в мини-профилей пользователей, которые появляются при наведении на их ник."],
                 type: "checkbox",
                 default: true,
-                label: "Редактирование заметки"
+                label: "Редактирование заметки."
             },
             miniProfileStoryTags: {
                 type: "checkbox",
                 default: true,
-                label: "Основные теги постов пользователя"
+                label: "Основные теги постов пользователя."
             },
             miniProfileСommentTags: {
                 type: "checkbox",
                 default: true,
-                label: "Основные теги постов, где пользователь оставляет комментарии"
+                label: "Основные теги постов, где пользователь оставляет комментарии."
             },
             miniProfileСomments: {
                 type: "checkbox",
                 default: false,
-                label: "Последние комментарии пользователя"
+                label: "Последние комментарии пользователя."
             },
             miniProfileAutoloadTags: {
                 type: "checkbox",
                 default: false,
-                label: "Автозагрузка тегов"
+                label: "Автозагрузка тегов."
+            },
+            miniProfileAutoloadComments: {
+                type: "checkbox",
+                default: false,
+                label: "Автозагрузка предпросмотра последних комментариев."
+            },
+            miniProfileAutoloadPikabuCommentCount: {
+                type: "number",
+                default: 1,
+                label: "Сколько комментариев загрузить без нажатия на кнопку Загрузить."
             },
             // СТРАНИЦА ПОЛЬЗОВАТЕЛЯ
             profileStoryTags: {
-                section: ["Настройки профилей пользователей", "То же самое, но только на странице профиля"],
+                section: ["Настройки профилей пользователей", "То же самое, но только на странице профиля."],
                 type: "checkbox",
                 default: true,
-                label: "Основные теги постов пользователя"
+                label: "Основные теги постов пользователя."
             },
             profileСommentTags: {
                 type: "checkbox",
                 default: true,
-                label: "Основные теги постов, где пользователь оставляет комментарии"
+                label: "Основные теги постов, где пользователь оставляет комментарии."
             },
             profileСomments: {
                 type: "checkbox",
                 default: true,
-                label: "Последние комментарии пользователя"
+                label: "Последние комментарии пользователя."
+            },
+            profileAutoloadComments: {
+                type: "checkbox",
+                default: true,
+                label: "Автозагрузка предпросмотра последних комментариев."
+            },
+            profileAutoloadPikabuCommentCount: {
+                type: "number",
+                default: 3,
+                label: "Сколько комментариев загрузить без нажатия на кнопку Загрузить."
             },
             // БОЛЕЕ СЛОЖНЫЕ НАСТРОЙКИ
             filteringPageRegex: {
@@ -2230,6 +2319,13 @@ function processOldStory(story, storyData) {
     processStoryComments(storyData.story.id, storyData, 1);
     return true;
 }
+const trackedLinkPattern = /pikabu.ru.+\?[ut]=(.+?)&[ut]=.+/i;
+function removeLinkTracker(link) {
+    if (trackedLinkPattern.test(link.href)) {
+        const realUrl = trackedLinkPattern.exec(link.href)[1];
+        link.href = decodeURIComponent(realUrl);
+    }
+}
 async function processStory(story, processComments) {
     // Block author button
     if (GM_config.get('showBlockAuthorForeverButton')) {
@@ -2238,6 +2334,11 @@ async function processStory(story, processComments) {
     // Links
     if (GM_config.get('socialLinks')) {
         checkStoryLinks(story);
+    }
+    // Remove pikabu trackers
+    if (GM_config.get('noLinkTracking')) {
+        const links = story.querySelectorAll('a');
+        links.forEach(removeLinkTracker);
     }
     // Block paid stories
     if (enableFilters &&
@@ -2466,12 +2567,17 @@ function updateTheme() {
 }
 function isDarkMode() {
     const config = JSON.parse(localStorage.getItem('pkb_theme'));
-    return config.d;
+    return config !== null && config.d;
 }
 function switchDarkMode(enabled) {
     const config = JSON.parse(localStorage.getItem('pkb_theme'));
-    config.d = enabled;
-    localStorage.setItem('pkb_theme', JSON.stringify(config));
+    if (config !== null) {
+        config.d = enabled;
+        localStorage.setItem('pkb_theme', JSON.stringify(config));
+    }
+    else {
+        localStorage.setItem('rpm-dark-mode', JSON.stringify(enabled));
+    }
     updateTheme();
 }
 function getTheme() {
@@ -2479,6 +2585,9 @@ function getTheme() {
     if (rpmTheme !== null)
         return rpmTheme;
     const config = JSON.parse(localStorage.getItem('pkb_theme'));
+    if (config === null) {
+        return 'default';
+    }
     return config.t;
 }
 function setTheme(theme) {
@@ -2487,8 +2596,10 @@ function setTheme(theme) {
 }
 function createGollumTagsGetter(tagsType) {
     return async (userId) => {
-        const response = await fetch(`https://gollum.space/api/${userId}-${tagsType}`);
-        const data = await response.json();
+        // const response = await fetch(`https://gollum.space/api/${userId}-${tagsType}`);
+        const request = new HttpRequest(`https://gollum.space/api/${userId}-${tagsType}`, "GET", "json");
+        const response = await request.executeAsync();
+        const data = response.response;
         return Object.values(data).map(x => x.TagRU);
     };
 }
@@ -2511,10 +2622,16 @@ function handleMiniProfile(element) {
     const userName = element.querySelector('.pkb-profile-username h2').textContent;
     function updateNoteElement() {
         let note = newNotes.get(userId);
+        let noteHtml;
         const pkbNoteElem = element.querySelector('.mini-profile__note');
         if (pkbNoteElem) {
-            if (note === undefined || note === null)
+            if (note === undefined || note === null) {
                 note = pkbNoteElem.textContent;
+                noteHtml = pkbNoteElem.innerHTML;
+                for (const link of pkbNoteElem.querySelectorAll('a')) {
+                    note = note.replace(link.textContent, link.href);
+                }
+            }
             pkbNoteElem.remove();
         }
         const noteElem = document.createElement('div');
@@ -2524,11 +2641,25 @@ function handleMiniProfile(element) {
         textareaElem.setAttribute('rows', '1');
         textareaElem.setAttribute('placeholder', 'Заметка об этом пользователе будет видна только вам. Нажмите, чтобы ввести текст.');
         textareaElem.value = note ?? '';
-        noteElem.append(textareaElem);
+        const noteDisplayElem = document.createElement('cite');
+        noteDisplayElem.classList.add('rpm-mini-profile-note-display');
+        noteDisplayElem.innerHTML = noteHtml ?? note ?? 'Заметка об этом пользователе будет видна только вам. Нажмите, чтобы ввести текст.';
+        noteElem.append(textareaElem, noteDisplayElem);
         const mainElem = element.querySelector('.mini-profile__main');
         mainElem.append(noteElem);
         const rpmPoweredElem = RPM.Nodes.createPoweredNote('Улучшено с помощью Return Pikabu minus');
         mainElem.append(rpmPoweredElem);
+        function setTextareaActive(active) {
+            if (active) {
+                textareaElem.style.display = '';
+                noteDisplayElem.style.display = 'none';
+            }
+            else {
+                textareaElem.style.display = 'none';
+                noteDisplayElem.style.display = '';
+            }
+        }
+        setTextareaActive(false);
         let saved = true;
         async function save() {
             saved = true;
@@ -2556,12 +2687,21 @@ function handleMiniProfile(element) {
             }
             timeout = setTimeout(save, 1500);
         });
-        textareaElem.addEventListener('blur', () => {
+        const onUnfocus = () => {
+            setTextareaActive(false);
+            noteDisplayElem.textContent = textareaElem.value;
             if (timeout !== null && !saved) {
                 clearTimeout(timeout);
                 timeout = null;
                 save();
             }
+        };
+        textareaElem.addEventListener('blur', onUnfocus);
+        textareaElem.addEventListener('focusout', onUnfocus);
+        // textareaElem.addEventListener('mouseout', onUnfocus);
+        noteDisplayElem.addEventListener('click', () => {
+            setTextareaActive(true);
+            textareaElem.focus();
         });
     }
     function gollumIntegration() {
@@ -2579,7 +2719,7 @@ function handleMiniProfile(element) {
             worked = true;
         }
         if (GM_config.get('miniProfileСomments')) {
-            const lastComments = RPM.Nodes.createLastCommentsSection(userName, 3);
+            const lastComments = RPM.Nodes.createLastCommentsSection(userName, GM_config.get('miniProfileAutoloadComments'), GM_config.get('miniProfileAutoloadPikabuCommentCount'), true);
             main.append(lastComments);
             worked = true;
         }
@@ -2830,7 +2970,7 @@ async function onUserProfilePage() {
     }
     if (GM_config.get('profileСomments')) {
         const section = document.createElement('section');
-        section.append(RPM.Nodes.createLastCommentsSection(userName, 3));
+        section.append(RPM.Nodes.createLastCommentsSection(userName, GM_config.get('profileAutoloadComments'), GM_config.get('profileAutoloadPikabuCommentCount')));
         feedPanel.parentElement.insertBefore(section, feedPanel);
         lastSection = section;
     }
