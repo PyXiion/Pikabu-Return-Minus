@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.9.1
+// @version      0.9.2
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -234,19 +234,30 @@ interface HttpRequestCallback {
   onSuccess(response: GM.Response<undefined>): void;
 }
 
+interface HttpRequestAdditionalParameters {
+  anonymous?: boolean;
+  fetch?: boolean;
+};
+
 abstract class AbstractHttpRequest {
   protected headers: Map<string, string>;
   protected httpMethod: HttpMethod;
   protected url: string;
   protected timeout: number;
   protected responseType: XMLHttpRequestResponseType;
+  protected additionalParameters: HttpRequestAdditionalParameters;
 
-  public constructor(url: string, responseType: XMLHttpRequestResponseType) {
+  public constructor(url: string, responseType: XMLHttpRequestResponseType, additionalParameters: HttpRequestAdditionalParameters = null) {
     this.url = url;
     this.httpMethod = "POST";
     this.headers = new Map<string, string>();
     this.timeout = 15000;
     this.responseType = responseType;
+    this.additionalParameters = {
+      anonymous: true,
+      fetch: true,
+      ...additionalParameters
+    };
   }
 
   public addHeader(key: string, value: string) {
@@ -261,11 +272,13 @@ abstract class AbstractHttpRequest {
   protected abstract getData(): any;
 
   public execute(callback: HttpRequestCallback) {
+    const data = this.getData();
+
     const details: GM.Request<undefined> = {
       url: this.url,
       method: this.httpMethod,
       headers: Object.fromEntries(this.headers),
-      data: JSON.stringify(this.getData()),
+      data: data ? JSON.stringify(data) : null,
       timeout: this.timeout,
       responseType: this.responseType,
 
@@ -273,11 +286,10 @@ abstract class AbstractHttpRequest {
       onload: callback.onSuccess,
       // TODO: ontimeout
       onabort: callback.onError,
-      ontimeout: callback.onError
+      ontimeout: callback.onError,
+      
+      ...this.additionalParameters
     };
-
-    (details as any).anonymous = true;
-    (details as any).fetch = true;
 
     GM.xmlHttpRequest(details);
   }
@@ -297,8 +309,8 @@ abstract class AbstractHttpRequest {
 class HttpRequest extends AbstractHttpRequest {
   protected body: any;
 
-  public constructor(url: string, method: HttpMethod = "GET", responseType: XMLHttpRequestResponseType) {
-    super(url, responseType);
+  public constructor(url: string, method: HttpMethod = "GET", responseType: XMLHttpRequestResponseType, additionalParameters: HttpRequestAdditionalParameters = null) {
+    super(url, responseType, additionalParameters);
     this.httpMethod = method;
   }
 
@@ -514,7 +526,7 @@ namespace Pikabu {
 
 
 
-//#region RPM API/Nodes
+//#region API/Nodes
 
 namespace RPM {
   export namespace Service {
@@ -769,248 +781,293 @@ namespace RPM {
         // TODO: check response
       }
     }
+  }
+}
 
-    namespace LastComments {
-      const CHUNK_SIZE = 5;
-      const COMMENT_UP_DEPTH = 1;
-      const COMMENT_DOWN_DEPTH = 2;
+//#endregion
 
-      const parser = new DOMParser();
+//#region Gollum
+namespace Gollum {
+  type GollumTagsType = "PostTags" | "CommentTags";
+  function createGollumTagsGetter(tagsType: GollumTagsType) {
+    return async (userId: number) => {
+      const request = new HttpRequest(`https://gollum.space/api/${userId}-${tagsType}`, "GET", "json");
+      const response = await request.executeAsync();
+      
+      const data: Object = response.response;
 
-      interface GollumCommentInfo {
-        id: number;
-        postId: number;
-        postTitle: string;
-        rating: string;
-        link: string;
-      }
+      return Object.values(data).map(x => x.TagRU);
+    }
+  }
 
-      async function loadCommentFromPikabu(info: GollumCommentInfo, parent: boolean = false, disableMiniProfile = false) {
-        const request = new HttpRequest(info.link, "GET", "arraybuffer");
-        request.addHeader('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0')
-        const response = await request.executeAsync();
-        
-        // Ебал я этот ваш Пикабу, нахуя он использует CP1251
-        const buffer = response.response as ArrayBuffer;
-        const dec = new TextDecoder('windows-1251');
-        const body = dec.decode(new Uint8Array(buffer));
-        const htmlDoc = parser.parseFromString(body, 'text/html');
+  export const storyTagsGetter = createGollumTagsGetter("PostTags");
+  export const commentTagsGetter = createGollumTagsGetter("CommentTags");
 
-        const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
-        const clone = wantedElem.cloneNode(true) as HTMLDivElement;
+  const idsCache = new Map<string, number>();
+  async function getUserId(userName: string) {
+    if (idsCache.has(userName)) {
+      return idsCache.get(userName);
+    }
+    const request = new HttpRequest(`https://gollum.space/user/${userName}-summary`, "GET", "text");
+    const response = await request.executeAsync();
+    const doc = response.responseText as string;
+    
+    // we need $.get("/api/2036358-usertotalposts"
+    //                     ^^^^^^^
 
-        postprocessPikabuComment(clone, info.id, disableMiniProfile);
+    const id = parseInt(doc.match(/\/api\/(\d+)-/i)[1]);
+    idsCache.set(userName, id);
+    return id;
+  }
 
-        return clone;
-      }
+  namespace LastComments {
+    const CHUNK_SIZE = 5;
+    const COMMENT_UP_DEPTH = 1;
+    const COMMENT_DOWN_DEPTH = 2;
 
-      function postprocessPikabuComment(element: HTMLDivElement, commentId: number, disableMiniProfile = false) {
-        element.classList.add('rpm-comment-no-js');
+    const parser = new DOMParser();
 
-        element.querySelectorAll('.comment').forEach(x => {
-          x.classList.add(x.getAttribute('id'));
-          x.removeAttribute('id');
-
-          // Fix comment toggling
-          const children = x.querySelector(':scope > .comment__children') as HTMLDivElement;
-          const toggle = x.querySelector(':scope > .comment-toggle-children') as HTMLDivElement;
-
-          if (children && toggle) {
-            toggle.addEventListener('click', (e) => {
-              e.preventDefault();
-              children.toggleAttribute('hidden');
-              toggle.classList.toggle('comment-toggle-children_collapse');
-            });
-          }
-        })
-
-        const commentElem = element.querySelector(`.comment_${commentId}`) as HTMLDivElement;
-        commentElem.classList.add('rpm-highlight-comment');
-
-        const children = commentElem.querySelector(':scope > .comment__children') as HTMLDivElement;
-        const toggle = commentElem.querySelector(':scope > .comment-toggle-children') as HTMLDivElement;
-        children.toggleAttribute('hidden');
-        toggle.classList.toggle('comment-toggle-children_collapse');
-
-        // Depth control
-        commentElem.querySelectorAll(':scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
-          x.remove();
-        });
-
-        let parent: HTMLDivElement = commentElem;
-        for (let i = 0; i < COMMENT_UP_DEPTH; ++i) {
-          const nextParent = parent.parentElement;
-
-          if (nextParent && nextParent.matches('.comment__children') && nextParent.parentElement.matches('.comment')) {
-            // remove neighbours
-            for (const child of nextParent.children) {
-              if (child !== parent)
-                child.remove();
-            }
-
-            parent = nextParent.parentElement as HTMLDivElement;
-          } else {
-            break;
-          }
-
-        }
-
-        if (parent !== element && parent.parentElement !== null)
-          parent.replaceWith(commentElem);
-
-        if (disableMiniProfile) {
-          element.querySelectorAll('.comment__user').forEach((x: HTMLDivElement) => {
-            x.removeAttribute('data-profile')
-          })
-        }
-
-        element.querySelectorAll('img').forEach((x: HTMLImageElement) => {
-          if (x.hasAttribute('data-src')) {
-            x.src = x.getAttribute('data-src');
-            x.classList.add('image-loaded');
-          }
-        })
-      }
-
-      function createCommentContainer(info: GollumCommentInfo, autoload: boolean, disableMiniProfile) {
-        const container = document.createElement('div');
-        container.classList.add('rpm-comment-container');
-
-
-        const title = document.createElement('a');
-        title.href = info.link;
-        title.target = "_blank";
-        title.textContent = `${info.rating} | ${info.postTitle}`
-
-
-        const loadFull = async () => {
-          const icon = createLoadingIcon();
-          preview.replaceWith(icon);
-
-          const pikabuComment = await loadCommentFromPikabu(info, true, disableMiniProfile);
-          icon.replaceWith(pikabuComment);
-        };
-
-        const preview = createCommentPreview(info, loadFull);
-        
-        container.append(title, preview);
-
-        if (autoload) {
-          loadFull();
-        }
-
-        return container;
-      }
-
-      function createCommentPreview(info: GollumCommentInfo, loadCallback: (() => any)): HTMLDivElement {
-        const container = document.createElement('div');
-        container.classList.add('rpm-comment-preview');
-
-        const buttonToLoad = document.createElement('button');
-        buttonToLoad.textContent = 'Загрузить';
-        buttonToLoad.addEventListener('click', loadCallback);
-
-        container.append(buttonToLoad);
-
-        return container;
-      }
-  
-      async function loadCommentsFromGollum(userName: string): Promise<GollumCommentInfo[]> {
-        // const response = await fetch(`https://gollum.space/user/${userName}-last`);
-        const request = new HttpRequest(`https://gollum.space/user/${userName}-last`, "GET", "document");
-        const response = await request.executeAsync();
-        // const buffer = response.response as ArrayBuffer;
-        // const dec = new TextDecoder('utf-8');
-        // const body = dec.decode(buffer);
-        // const htmlDoc = parser.parseFromString(body, 'text/html');
-        const htmlDoc = response.response as Document;
-
-        const comments = Array.from(htmlDoc.querySelectorAll('.comment-block')) as HTMLDivElement[];
-
-        return comments.map(elem => {
-          const anchor = elem.querySelector('.comment-link') as HTMLAnchorElement;
-          const [rating, postTitle] = elem.getAttribute('title').split('|').map(x => x.trim());
-
-          return {
-            id: parseInt(anchor.textContent),
-            postId: parseInt(elem.getAttribute('post')),
-            postTitle,
-            rating,
-            link: anchor.href.replace('pikabu.ru', 'gollum.space')
-          }
-        })
-      }
-
-      export function createLastCommentsSection(userName: string, autoloadGollum = false, autoloadCount = 0, disableMiniProfile = false) {
-        const main = document.createElement('div');
-        main.classList.add('rpm-last-comments');
-  
-        const title = document.createElement('h4');
-        title.textContent = 'Последние комментарии';
-  
-        const containerOfComments = document.createElement('div');
-        containerOfComments.classList.add('rpm-last-comments-container');
-
-        const loadMoreBtn = document.createElement('button');
-        loadMoreBtn.textContent = 'Загрузить'
-
-        main.append(title, containerOfComments, loadMoreBtn);
-  
-        async function *loadComments() {
-          loadMoreBtn.textContent = 'Больше комментариев'
-
-          const loadingIcon = createLoadingIcon();
-          containerOfComments.append(loadingIcon);
-          loadMoreBtn.style.display = 'none';
-          const comments = await loadCommentsFromGollum(userName);
-          loadMoreBtn.style.display = '';
-          loadingIcon.remove();
-
-          if (comments.length === 0) {
-            containerOfComments.append('Комментарии не найдены.')
-          } else {
-            let count = 0;
-            for (const comment of comments) {
-              containerOfComments.append(createCommentContainer(comment, count < autoloadCount, disableMiniProfile))
-
-              if (++count % CHUNK_SIZE == 0) {
-                yield;
-              }
-            }
-          }
-
-          loadMoreBtn.remove();
-        }
-
-        const loader = loadComments()
-        if (autoloadGollum)
-          loader.next();
-        loadMoreBtn.addEventListener('click', () => {
-          loader.next();
-        });
-
-        return main;
-      }
+    interface GollumCommentInfo {
+      id: number;
+      postId: number;
+      postTitle: string;
+      rating: string;
+      link: string;
     }
 
-    export const createLastCommentsSection = LastComments.createLastCommentsSection;
-    
-    namespace TagsSection {
-      function createTag(name: string) {
-        const elem = document.createElement('span');
-        elem.classList.add('rpm-tags-tag');
-        elem.textContent = name;
-        return elem;
+    async function loadCommentFromPikabu(info: GollumCommentInfo, parent: boolean = false, disableMiniProfile = false) {
+      const request = new HttpRequest(info.link, "GET", "arraybuffer", {
+        anonymous: false
+      });
+      request.addHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59')
+      const response = await request.executeAsync();
+      
+      // Ебал я этот ваш Пикабу, нахуя он использует CP1251
+      const buffer = response.response as ArrayBuffer;
+      const dec = new TextDecoder('windows-1251');
+      const body = dec.decode(new Uint8Array(buffer));
+      const htmlDoc = parser.parseFromString(body, 'text/html');
+
+      const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
+      const clone = wantedElem.cloneNode(true) as HTMLDivElement;
+
+      postprocessPikabuComment(clone, info.id, disableMiniProfile);
+
+      return clone;
+    }
+
+    function postprocessPikabuComment(element: HTMLDivElement, commentId: number, disableMiniProfile = false) {
+      element.classList.add('rpm-comment-no-js');
+
+      element.querySelectorAll('.comment').forEach(x => {
+        x.classList.add(x.getAttribute('id'));
+        x.removeAttribute('id');
+
+        // Fix comment toggling
+        const children = x.querySelector(':scope > .comment__children') as HTMLDivElement;
+        const toggle = x.querySelector(':scope > .comment-toggle-children') as HTMLDivElement;
+
+        if (children && toggle) {
+          toggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            children.toggleAttribute('hidden');
+            toggle.classList.toggle('comment-toggle-children_collapse');
+          });
+        }
+      })
+
+      const commentElem = element.querySelector(`.comment_${commentId}`) as HTMLDivElement;
+      commentElem.classList.add('rpm-highlight-comment');
+
+      const children = commentElem.querySelector(':scope > .comment__children') as HTMLDivElement;
+      const toggle = commentElem.querySelector(':scope > .comment-toggle-children') as HTMLDivElement;
+      if (children && toggle) {
+        children.toggleAttribute('hidden');
+        toggle.classList.toggle('comment-toggle-children_collapse');
       }
+
+      // Depth control
+      commentElem.querySelectorAll(':scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
+        x.remove();
+      });
+
+      let parent: HTMLDivElement = commentElem;
+      for (let i = 0; i < COMMENT_UP_DEPTH; ++i) {
+        const nextParent = parent.parentElement;
+
+        if (nextParent && nextParent.matches('.comment__children') && nextParent.parentElement.matches('.comment')) {
+          // remove neighbours
+          for (const child of nextParent.children) {
+            if (child !== parent)
+              child.remove();
+          }
+
+          parent = nextParent.parentElement as HTMLDivElement;
+        } else {
+          break;
+        }
+
+      }
+
+      if (parent !== element && parent.parentElement !== null)
+        parent.replaceWith(commentElem);
+
+      if (disableMiniProfile) {
+        element.querySelectorAll('.comment__user').forEach((x: HTMLDivElement) => {
+          x.removeAttribute('data-profile')
+        })
+      }
+
+      element.querySelectorAll('img').forEach((x: HTMLImageElement) => {
+        if (x.hasAttribute('data-src')) {
+          x.src = x.getAttribute('data-src');
+          x.classList.add('image-loaded');
+        }
+      })
+    }
+
+    function createCommentContainer(info: GollumCommentInfo, autoload: boolean, disableMiniProfile) {
+      const container = document.createElement('div');
+      container.classList.add('rpm-comment-container');
+
+
+      const title = document.createElement('a');
+      title.href = info.link;
+      title.target = "_blank";
+      title.textContent = `${info.rating} | ${info.postTitle}`
+
+
+      const loadFull = async () => {
+        const icon = RPM.Nodes.createLoadingIcon();
+        preview.replaceWith(icon);
+
+        try {
+          const pikabuComment = await loadCommentFromPikabu(info, true, disableMiniProfile);
+          icon.replaceWith(pikabuComment);
+        } catch (e) {
+          error(e);
+          icon.replaceWith('Не удалось загрузить комментарий :(');
+        }
+      };
+
+      const preview = createCommentPreview(info, loadFull);
+      
+      container.append(title, preview);
+
+      if (autoload) {
+        loadFull();
+      }
+
+      return container;
+    }
+
+    function createCommentPreview(info: GollumCommentInfo, loadCallback: (() => any)): HTMLDivElement {
+      const container = document.createElement('div');
+      container.classList.add('rpm-comment-preview');
+
+      const buttonToLoad = document.createElement('button');
+      buttonToLoad.textContent = 'Загрузить';
+      buttonToLoad.addEventListener('click', loadCallback);
+
+      container.append(buttonToLoad);
+
+      return container;
+    }
+
+    async function loadCommentsFromGollum(userName: string): Promise<GollumCommentInfo[]> {
+      userName = userName.replace('.', '_');
+
+      const request = new HttpRequest(`https://gollum.space/user/${userName}-last`, "GET", "document");
+      const response = await request.executeAsync();
+      const htmlDoc = response.response as Document;
+
+      const comments = Array.from(htmlDoc.querySelectorAll('.comment-block')) as HTMLDivElement[];
+
+      return comments.map(elem => {
+        const anchor = elem.querySelector('.comment-link') as HTMLAnchorElement;
+        const [rating, postTitle] = elem.getAttribute('title').split('|').map(x => x.trim());
+
+        return {
+          id: parseInt(anchor.textContent),
+          postId: parseInt(elem.getAttribute('post')),
+          postTitle,
+          rating,
+          link: anchor.href.replace('pikabu.ru', 'gollum.space')
+        }
+      })
+    }
+
+    export function createLastCommentsSection(userName: string, autoloadGollum = false, autoloadCount = 0, disableMiniProfile = false) {
+      const main = document.createElement('div');
+      main.classList.add('rpm-last-comments');
+
+      const title = document.createElement('h4');
+      title.textContent = 'Последние комментарии';
+
+      const containerOfComments = document.createElement('div');
+      containerOfComments.classList.add('rpm-last-comments-container');
+
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.textContent = 'Загрузить'
+
+      main.append(title, containerOfComments, loadMoreBtn);
+
+      async function *loadComments() {
+        loadMoreBtn.textContent = 'Больше комментариев'
+
+        const loadingIcon = RPM.Nodes.createLoadingIcon();
+        containerOfComments.append(loadingIcon);
+        loadMoreBtn.style.display = 'none';
+        const comments = await loadCommentsFromGollum(userName);
+        loadMoreBtn.style.display = '';
+        loadingIcon.remove();
+
+        if (comments.length === 0) {
+          containerOfComments.append('Комментарии не найдены.')
+        } else {
+          let count = 0;
+          for (const comment of comments) {
+            containerOfComments.append(createCommentContainer(comment, count < autoloadCount, disableMiniProfile))
+
+            if (++count % CHUNK_SIZE == 0) {
+              yield;
+            }
+          }
+        }
+
+        loadMoreBtn.remove();
+      }
+
+      const loader = loadComments()
+      if (autoloadGollum)
+        loader.next();
+      loadMoreBtn.addEventListener('click', () => {
+        loader.next();
+      });
+
+      return main;
+    }
+  }
+
+  export const createLastCommentsSection = LastComments.createLastCommentsSection;
   
-      export function createTagsSection(userId: number, tagsGetter: ((userId: number) => Promise<string[]>), autoload = false) {
-        const elem = document.createElement('div');
-        elem.classList.add('rpm-tags-list');
-        elem.innerHTML = '<span class="rpm-clickable">Нажмите, чтобы загрузить.</span>'
-  
-        const loadTags = () => {
-          const loadingIcon = RPM.Nodes.createLoadingIcon();
-          elem.replaceChildren(loadingIcon);
+  namespace TagsSection {
+    function createTag(name: string) {
+      const elem = document.createElement('span');
+      elem.classList.add('rpm-tags-tag');
+      elem.textContent = name;
+      return elem;
+    }
+
+    export function createTagsSection(userName: string, tagsGetter: ((userId: number) => Promise<string[]>), autoload = false) {
+      const elem = document.createElement('div');
+      elem.classList.add('rpm-tags-list');
+      elem.innerHTML = '<span class="rpm-clickable">Нажмите, чтобы загрузить.</span>';
+
+      const loadTags = () => {
+        const loadingIcon = RPM.Nodes.createLoadingIcon();
+        elem.replaceChildren(loadingIcon);
+        getUserId(userName).then(userId => {
           tagsGetter(userId).then((tags: string[]) => {
             const tagElems = tags.map(createTag);
             if (tagElems.length > 0) {
@@ -1019,44 +1076,48 @@ namespace RPM {
               elem.append('Теги не найдены.')
             }
             loadingIcon.remove();
-          }, () => {
-            elem.textContent = 'Не удалось получить теги.'
+          }, e => {
+            elem.textContent = 'Не удалось получить теги.';
+            error(e);
           });
-        };
-  
-        if (!autoload) {
-          const onClick = () => {
-            loadTags();
-            elem.removeEventListener('click', onClick);
-          };
-          elem.addEventListener('click', onClick);
-        } else {
-          loadTags();
-        }
+        }, e => {
+          elem.textContent = 'Не удалось достучаться до Голлума и получить ID пользователя.';
+          error(e)
+        })
         
-  
-        return elem;
+      };
+
+      if (!autoload) {
+        const onClick = () => {
+          loadTags();
+          elem.removeEventListener('click', onClick);
+        };
+        elem.addEventListener('click', onClick);
+      } else {
+        loadTags();
       }
       
-      export function createTagsContainer(userId: number, name: string, getter: (userId: number) => Promise<string[]>, autoload = false) {
-        const elem = document.createElement('div');
-        elem.classList.add('rpm-tags');
-  
-        const nameElem = document.createElement('h4');
-        nameElem.textContent = name;
-  
-        const tagsList = RPM.Nodes.createTagsSection(userId, getter, autoload);
-  
-        elem.append(nameElem, tagsList);
-  
-        return elem;
-      }
-    }
-    export const createTagsSection = TagsSection.createTagsSection;
-    export const createTagsContainer = TagsSection.createTagsContainer;
-  }
-}
 
+      return elem;
+    }
+    
+    export function createTagsContainer(userName: string, name: string, getter: (userId: number) => Promise<string[]>, autoload = false) {
+      const elem = document.createElement('div');
+      elem.classList.add('rpm-tags');
+
+      const nameElem = document.createElement('h4');
+      nameElem.textContent = name;
+
+      const tagsList = createTagsSection(userName, getter, autoload);
+
+      elem.append(nameElem, tagsList);
+
+      return elem;
+    }
+  }
+  export const createTagsSection = TagsSection.createTagsSection;
+  export const createTagsContainer = TagsSection.createTagsContainer;
+}
 //#endregion
 
 class Deferred<T> {
@@ -1701,8 +1762,14 @@ html[data-theme="ocean-breeze"] .achievements-progress__bar,
 html[data-theme="sunset-glow"] .achievements-progress__bar {
   color: white;
 }
-/* MINI PROFILE */.rpm-mini-profile-note {
+/* MINI PROFILE */
+
+.rpm-mini-profile-note {
   resize: none;
+}
+.rpm-mini-profile-note-display {
+  display: block;
+  min-height: 10px;
 }
 .rpm-powered {
   text-align: right;
@@ -3057,22 +3124,6 @@ function setTheme(theme: string) {
   updateTheme();
 }
 
-type GollumTagsType = "PostTags" | "CommentTags";
-function createGollumTagsGetter(tagsType: GollumTagsType) {
-  return async (userId: number) => {
-    // const response = await fetch(`https://gollum.space/api/${userId}-${tagsType}`);
-    const request = new HttpRequest(`https://gollum.space/api/${userId}-${tagsType}`, "GET", "json");
-    const response = await request.executeAsync();
-    
-    const data: Object = response.response;
-
-    return Object.values(data).map(x => x.TagRU);
-  }
-}
-
-const getGollumStoryTags = createGollumTagsGetter("PostTags");
-const getGollumCommentTags = createGollumTagsGetter("CommentTags");
-
 
 let csrfToken = null;
 async function requestCsrfToken() {
@@ -3142,7 +3193,7 @@ function handleMiniProfile(element: HTMLDivElement) {
       }
     }
 
-    setTextareaActive(false);
+    setTextareaActive(note === '');
 
     let saved = true;
     async function save() {
@@ -3186,7 +3237,6 @@ function handleMiniProfile(element: HTMLDivElement) {
     };
     textareaElem.addEventListener('blur', onUnfocus);
     textareaElem.addEventListener('focusout', onUnfocus);
-    // textareaElem.addEventListener('mouseout', onUnfocus);
 
     noteDisplayElem.addEventListener('click', () => {
       setTextareaActive(true);
@@ -3200,23 +3250,23 @@ function handleMiniProfile(element: HTMLDivElement) {
 
     let worked = false;
     if (GM_config.get('miniProfileStoryTags')) {
-      const storyTagsElem = RPM.Nodes.createTagsContainer(userId, 'Теги постов', getGollumStoryTags, GM_config.get('miniProfileAutoloadTags') as boolean);
+      const storyTagsElem = Gollum.createTagsContainer(userName, 'Теги постов', Gollum.storyTagsGetter, GM_config.get('miniProfileAutoloadTags') as boolean);
       main.append(storyTagsElem);
       worked = true;
     }
     if (GM_config.get('miniProfileСommentTags')) {
-      const commentsTagsElem = RPM.Nodes.createTagsContainer(userId, 'Теги комментариев', getGollumCommentTags, GM_config.get('miniProfileAutoloadTags') as boolean);
+      const commentsTagsElem = Gollum.createTagsContainer(userName, 'Теги комментариев', Gollum.commentTagsGetter, GM_config.get('miniProfileAutoloadTags') as boolean);
       main.append(commentsTagsElem);
       worked = true;
     }
     if (GM_config.get('miniProfileСomments')) {
-      const lastComments = RPM.Nodes.createLastCommentsSection(userName, GM_config.get('miniProfileAutoloadComments') as boolean, GM_config.get('miniProfileAutoloadPikabuCommentCount') as number, true);
+      const lastComments = Gollum.createLastCommentsSection(userName, GM_config.get('miniProfileAutoloadComments') as boolean, GM_config.get('miniProfileAutoloadPikabuCommentCount') as number, true);
       main.append(lastComments);
       worked = true;
     }
 
     if (worked) {
-      const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName}-summary" target="_blank">gollum.space</a>`);
+      const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName.replace('.', '_')}-summary" target="_blank">gollum.space</a>`);
       main.append(poweredElem)
     }
 
@@ -3497,7 +3547,6 @@ async function onLoad() {
 
 async function onUserProfilePage() {
   const userName = document.querySelector('.page-profile .profile__nick').textContent;
-  const userId = parseInt(document.querySelector('.page-profile .profile').getAttribute('data-user-id'));
 
   const feedPanel = document.querySelector('.feed-panel, .user-filters');
 
@@ -3506,28 +3555,28 @@ async function onUserProfilePage() {
   await waitConfig();
   if (GM_config.get('profileStoryTags')) {
     const section = document.createElement('section');
-    section.append(RPM.Nodes.createTagsContainer(userId, 'Теги постов', getGollumStoryTags, true));
+    section.append(Gollum.createTagsContainer(userName, 'Теги постов', Gollum.storyTagsGetter, true));
     feedPanel.parentElement.insertBefore(section, feedPanel);
     lastSection = section;
   }
 
   if (GM_config.get('profileСommentTags')) {
     const section = document.createElement('section');
-    section.append(RPM.Nodes.createTagsContainer(userId, 'Теги комментариев', getGollumCommentTags, true));
+    section.append(Gollum.createTagsContainer(userName, 'Теги комментариев', Gollum.commentTagsGetter, true));
     feedPanel.parentElement.insertBefore(section, feedPanel);
     lastSection = section;
   }
 
   if (GM_config.get('profileСomments')) {
     const section = document.createElement('section');
-    section.append(RPM.Nodes.createLastCommentsSection(userName, GM_config.get('profileAutoloadComments') as boolean, GM_config.get('profileAutoloadPikabuCommentCount') as number))
+    section.append(Gollum.createLastCommentsSection(userName, GM_config.get('profileAutoloadComments') as boolean, GM_config.get('profileAutoloadPikabuCommentCount') as number))
     feedPanel.parentElement.insertBefore(section, feedPanel);
     lastSection = section;
   }
 
   // Powered
   if (lastSection !== null) {
-    const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName}-summary" target="_blank">gollum.space</a>`);
+    const poweredElem = RPM.Nodes.createPoweredNote(`Данные получены с <a href="https://gollum.space/user/${userName.replace('.', '_')}-summary" target="_blank">gollum.space</a>`);
     const rpmPoweredElem = RPM.Nodes.createPoweredNote('Работает с помощью Return Pikabu minus');
     lastSection.append(poweredElem, rpmPoweredElem);
   }
