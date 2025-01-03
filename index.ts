@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.9.2
+// @version      0.9.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -514,8 +514,8 @@ namespace Pikabu {
         const commentsData = new CommentsData(payload);
 
         return commentsData;
-      } catch (error) {
-        error(error);
+      } catch (e) {
+        error(e);
         return null;
       }
     }
@@ -725,7 +725,7 @@ namespace RPM {
         set('.rpm-rating', rating);
         set('.rpm-minuses', minuses);
 
-        elem.querySelector('.rpm-loading').remove();
+        elem.querySelector('.rpm-loading')?.remove();
       }
 
       export async function updateUserRatingElemAsync(elem: HTMLDivElement, infoConsumer: (info: RpmJson.UserInfo) => void = null) {
@@ -808,7 +808,7 @@ namespace Gollum {
     if (idsCache.has(userName)) {
       return idsCache.get(userName);
     }
-    const request = new HttpRequest(`https://gollum.space/user/${userName}-summary`, "GET", "text");
+    const request = new HttpRequest(`https://gollum.space/user/${userName.replace('.', '_')}-summary`, "GET", "text");
     const response = await request.executeAsync();
     const doc = response.responseText as string;
     
@@ -822,7 +822,7 @@ namespace Gollum {
 
   namespace LastComments {
     const CHUNK_SIZE = 5;
-    const COMMENT_UP_DEPTH = 1;
+    const COMMENT_UP_DEPTH = 2;
     const COMMENT_DOWN_DEPTH = 2;
 
     const parser = new DOMParser();
@@ -851,9 +851,7 @@ namespace Gollum {
       const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
       const clone = wantedElem.cloneNode(true) as HTMLDivElement;
 
-      postprocessPikabuComment(clone, info.id, disableMiniProfile);
-
-      return clone;
+      return postprocessPikabuComment(clone, info.id, disableMiniProfile);
     }
 
     function postprocessPikabuComment(element: HTMLDivElement, commentId: number, disableMiniProfile = false) {
@@ -887,30 +885,27 @@ namespace Gollum {
       }
 
       // Depth control
-      commentElem.querySelectorAll(':scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
-        x.remove();
-      });
+      // commentElem.querySelectorAll(':scope' + ' > .comment__children > .comment'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
+      //   x.remove();
+      // });
 
-      let parent: HTMLDivElement = commentElem;
+      let parent = commentElem as HTMLElement;
       for (let i = 0; i < COMMENT_UP_DEPTH; ++i) {
-        const nextParent = parent.parentElement;
-
-        if (nextParent && nextParent.matches('.comment__children') && nextParent.parentElement.matches('.comment')) {
-          // remove neighbours
-          for (const child of nextParent.children) {
-            if (child !== parent)
+        const container = parent.parentElement as HTMLElement;
+        
+        if (container !== null && container.matches('.comment__children')) {
+          for (const child of container.childNodes) {
+            if (child.nodeType === Node.ELEMENT_NODE && !parent.isSameNode(child)) {
               child.remove();
+              // (child as HTMLElement).style.opacity = '50%';
+            }
           }
 
-          parent = nextParent.parentElement as HTMLDivElement;
-        } else {
-          break;
+          const parentComment = container.parentElement as HTMLElement;
+          parent = parentComment;
         }
-
+        
       }
-
-      if (parent !== element && parent.parentElement !== null)
-        parent.replaceWith(commentElem);
 
       if (disableMiniProfile) {
         element.querySelectorAll('.comment__user').forEach((x: HTMLDivElement) => {
@@ -924,6 +919,8 @@ namespace Gollum {
           x.classList.add('image-loaded');
         }
       })
+
+      return parent;
     }
 
     function createCommentContainer(info: GollumCommentInfo, autoload: boolean, disableMiniProfile) {
@@ -1132,7 +1129,7 @@ class Deferred<T> {
     })
   }
 }
-function waitForElement(selector, timeout = 5000, parent = null) {
+function waitForElement(selector, timeout = 5000, parent = null): Promise<HTMLElement> {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     parent = parent ?? document;
@@ -1762,9 +1759,7 @@ html[data-theme="ocean-breeze"] .achievements-progress__bar,
 html[data-theme="sunset-glow"] .achievements-progress__bar {
   color: white;
 }
-/* MINI PROFILE */
-
-.rpm-mini-profile-note {
+/* MINI PROFILE */.rpm-mini-profile-note {
   resize: none;
 }
 .rpm-mini-profile-note-display {
@@ -1814,7 +1809,7 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
 }
 .rpm-last-comments-container {
   max-height: 150px;
-  overflow: scroll;
+  overflow-y: scroll;
 }
 .rpm-comment-no-js .comment__tools,
 .rpm-comment-no-js .comment__controls,
@@ -1833,7 +1828,6 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
   max-height: 400px;
   height: max-content;
   resize: vertical;
-  min-height: max-content;
   border-radius: 15px;
   margin-bottom: 10px;
 }
@@ -1852,6 +1846,9 @@ section .rpm-last-comments-container {
   width: 100%;
   text-align: center;
   margin-bottom: 5px;
+}
+.rpm-comment-container .comment__tools > *:not([data-role="link"]) {
+  display: none;
 }
 .rpm-comment-preview {
   text-align: center;
@@ -2466,8 +2463,6 @@ function processComment(comment: Pikabu.Comment | CommentData) {
     return;
   }
   
-  if (GM_config.get('rpmComments'))
-    processCommentRpm(commentElem);
 
   const userElem = commentElem.querySelector(".comment__user");
   const ratingDown = commentElem.querySelector(".comment__rating-down");
@@ -2824,7 +2819,20 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
     info("Удалил пост", story, "как проплаченный")
   }
 
+  // RPM
+  if (GM_config.get('rpmEnabled')) {
+    try {
+      processStoryRpm(story);
+    } catch (e) {
+      error(e)
+    }
+  }
+
   const storyId = parseInt(story.getAttribute("data-story-id"));
+  if (GM_config.get('rpmComments') && isStoryPage && currentStoryId === storyId) {
+    document.querySelectorAll('.comment').forEach(processCommentRpm);
+  }
+
 
   // get story data
   const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
@@ -2845,9 +2853,6 @@ async function processStory(story: HTMLDivElement, processComments: boolean) {
   // videos
   if (GM_config.get('videoDownloadButtons'))
     processPostVideos(story, storyData);
-  
-  if (GM_config.get('rpmEnabled'))
-    processStoryRpm(story);
   processOldStory(story, storyData);
 }
 
@@ -3294,6 +3299,11 @@ function mutationsListener(
           const commentElem = node.closest(".comment") as HTMLDivElement;
           info('Поймал голову комментария!', commentElem)
           processCached(commentElem);
+
+          // RPM
+          if (GM_config.get('rpmComments')) {
+            processCommentRpm(commentElem)
+          }
         } else if (node.matches("article.story")) {
           const storyElem = node as HTMLDivElement;
           info('Поймал пост!', storyElem)
@@ -3302,9 +3312,8 @@ function mutationsListener(
           commentMoreBtn()
         } else if (node.matches('.overlay')) {
           info('Поймал .overlay!');
-          
-          (async () => {
-            const e = await waitForElement('.theme-picker__popup, .mini-profile', 1500, node) as HTMLDivElement;
+
+          waitForElement('.theme-picker__popup, .mini-profile', 500, node).then((e: HTMLDivElement) => {
             if (e.matches('.mini-profile')) {
               info('Поймал мини-профиль!', e)
               handleMiniProfile(e as any);
@@ -3312,7 +3321,7 @@ function mutationsListener(
               info('Поймал селектор типов!')
               appendCustomThemesUi(e as any);
             }
-          })();
+          }, () => {});
         } else if (node.matches('.mini-profile')) {
           handleMiniProfile(node as any);
         }

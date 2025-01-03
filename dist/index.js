@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.9.2
+// @version      0.9.5
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -406,8 +406,8 @@ var Pikabu;
                 const commentsData = new CommentsData(payload);
                 return commentsData;
             }
-            catch (error) {
-                error(error);
+            catch (e) {
+                error(e);
                 return null;
             }
         }
@@ -584,7 +584,7 @@ var RPM;
                 set('.rpm-pluses', pluses);
                 set('.rpm-rating', rating);
                 set('.rpm-minuses', minuses);
-                elem.querySelector('.rpm-loading').remove();
+                elem.querySelector('.rpm-loading')?.remove();
             }
             async function updateUserRatingElemAsync(elem, infoConsumer = null) {
                 const uid = parseInt(elem.getAttribute('pikabu-user-id'));
@@ -650,7 +650,7 @@ var Gollum;
         if (idsCache.has(userName)) {
             return idsCache.get(userName);
         }
-        const request = new HttpRequest(`https://gollum.space/user/${userName}-summary`, "GET", "text");
+        const request = new HttpRequest(`https://gollum.space/user/${userName.replace('.', '_')}-summary`, "GET", "text");
         const response = await request.executeAsync();
         const doc = response.responseText;
         // we need $.get("/api/2036358-usertotalposts"
@@ -662,7 +662,7 @@ var Gollum;
     let LastComments;
     (function (LastComments) {
         const CHUNK_SIZE = 5;
-        const COMMENT_UP_DEPTH = 1;
+        const COMMENT_UP_DEPTH = 2;
         const COMMENT_DOWN_DEPTH = 2;
         const parser = new DOMParser();
         async function loadCommentFromPikabu(info, parent = false, disableMiniProfile = false) {
@@ -678,8 +678,7 @@ var Gollum;
             const htmlDoc = parser.parseFromString(body, 'text/html');
             const wantedElem = htmlDoc.querySelector(parent === false ? `#comment_${info.id}` : '.comments');
             const clone = wantedElem.cloneNode(true);
-            postprocessPikabuComment(clone, info.id, disableMiniProfile);
-            return clone;
+            return postprocessPikabuComment(clone, info.id, disableMiniProfile);
         }
         function postprocessPikabuComment(element, commentId, disableMiniProfile = false) {
             element.classList.add('rpm-comment-no-js');
@@ -706,26 +705,23 @@ var Gollum;
                 toggle.classList.toggle('comment-toggle-children_collapse');
             }
             // Depth control
-            commentElem.querySelectorAll(':scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
-                x.remove();
-            });
+            // commentElem.querySelectorAll(':scope' + ' > .comment__children > .comment'.repeat(COMMENT_DOWN_DEPTH + 1) + ', :scope' + ' > .comment__children'.repeat(COMMENT_DOWN_DEPTH) + '> .comment-toggle-children').forEach(x => {
+            //   x.remove();
+            // });
             let parent = commentElem;
             for (let i = 0; i < COMMENT_UP_DEPTH; ++i) {
-                const nextParent = parent.parentElement;
-                if (nextParent && nextParent.matches('.comment__children') && nextParent.parentElement.matches('.comment')) {
-                    // remove neighbours
-                    for (const child of nextParent.children) {
-                        if (child !== parent)
+                const container = parent.parentElement;
+                if (container !== null && container.matches('.comment__children')) {
+                    for (const child of container.childNodes) {
+                        if (child.nodeType === Node.ELEMENT_NODE && !parent.isSameNode(child)) {
                             child.remove();
+                            // (child as HTMLElement).style.opacity = '50%';
+                        }
                     }
-                    parent = nextParent.parentElement;
-                }
-                else {
-                    break;
+                    const parentComment = container.parentElement;
+                    parent = parentComment;
                 }
             }
-            if (parent !== element && parent.parentElement !== null)
-                parent.replaceWith(commentElem);
             if (disableMiniProfile) {
                 element.querySelectorAll('.comment__user').forEach((x) => {
                     x.removeAttribute('data-profile');
@@ -737,6 +733,7 @@ var Gollum;
                     x.classList.add('image-loaded');
                 }
             });
+            return parent;
         }
         function createCommentContainer(info, autoload, disableMiniProfile) {
             const container = document.createElement('div');
@@ -1533,9 +1530,7 @@ html[data-theme="ocean-breeze"] .achievements-progress__bar,
 html[data-theme="sunset-glow"] .achievements-progress__bar {
   color: white;
 }
-/* MINI PROFILE */
-
-.rpm-mini-profile-note {
+/* MINI PROFILE */.rpm-mini-profile-note {
   resize: none;
 }
 .rpm-mini-profile-note-display {
@@ -1585,7 +1580,7 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
 }
 .rpm-last-comments-container {
   max-height: 150px;
-  overflow: scroll;
+  overflow-y: scroll;
 }
 .rpm-comment-no-js .comment__tools,
 .rpm-comment-no-js .comment__controls,
@@ -1604,7 +1599,6 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
   max-height: 400px;
   height: max-content;
   resize: vertical;
-  min-height: max-content;
   border-radius: 15px;
   margin-bottom: 10px;
 }
@@ -1623,6 +1617,9 @@ section .rpm-last-comments-container {
   width: 100%;
   text-align: center;
   margin-bottom: 5px;
+}
+.rpm-comment-container .comment__tools > *:not([data-role="link"]) {
+  display: none;
 }
 .rpm-comment-preview {
   text-align: center;
@@ -2121,8 +2118,6 @@ function processComment(comment) {
         }
         return;
     }
-    if (GM_config.get('rpmComments'))
-        processCommentRpm(commentElem);
     const userElem = commentElem.querySelector(".comment__user");
     const ratingDown = commentElem.querySelector(".comment__rating-down");
     if (!userElem || !ratingDown) {
@@ -2400,7 +2395,19 @@ async function processStory(story, processComments) {
         removeStory(story, "подписка Пикабу+", true);
         info("Удалил пост", story, "как проплаченный");
     }
+    // RPM
+    if (GM_config.get('rpmEnabled')) {
+        try {
+            processStoryRpm(story);
+        }
+        catch (e) {
+            error(e);
+        }
+    }
     const storyId = parseInt(story.getAttribute("data-story-id"));
+    if (GM_config.get('rpmComments') && isStoryPage && currentStoryId === storyId) {
+        document.querySelectorAll('.comment').forEach(processCommentRpm);
+    }
     // get story data
     const storyData = await Pikabu.DataService.fetchStory(storyId, 1);
     if (storyData === null || storyData === undefined) {
@@ -2416,8 +2423,6 @@ async function processStory(story, processComments) {
     // videos
     if (GM_config.get('videoDownloadButtons'))
         processPostVideos(story, storyData);
-    if (GM_config.get('rpmEnabled'))
-        processStoryRpm(story);
     processOldStory(story, storyData);
 }
 async function processStoryRpm(story) {
@@ -2787,6 +2792,10 @@ function mutationsListener(mutationList, observer) {
                     const commentElem = node.closest(".comment");
                     info('Поймал голову комментария!', commentElem);
                     processCached(commentElem);
+                    // RPM
+                    if (GM_config.get('rpmComments')) {
+                        processCommentRpm(commentElem);
+                    }
                 }
                 else if (node.matches("article.story")) {
                     const storyElem = node;
@@ -2798,8 +2807,7 @@ function mutationsListener(mutationList, observer) {
                 }
                 else if (node.matches('.overlay')) {
                     info('Поймал .overlay!');
-                    (async () => {
-                        const e = await waitForElement('.theme-picker__popup, .mini-profile', 1500, node);
+                    waitForElement('.theme-picker__popup, .mini-profile', 500, node).then((e) => {
                         if (e.matches('.mini-profile')) {
                             info('Поймал мини-профиль!', e);
                             handleMiniProfile(e);
@@ -2808,7 +2816,7 @@ function mutationsListener(mutationList, observer) {
                             info('Поймал селектор типов!');
                             appendCustomThemesUi(e);
                         }
-                    })();
+                    }, () => { });
                 }
                 else if (node.matches('.mini-profile')) {
                     handleMiniProfile(node);
