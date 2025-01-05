@@ -135,7 +135,9 @@ declare namespace RpmJson {
       pluses: number;
       minuses: number;
       base_rating: number;
+
       own_vote?: number;
+      own_reason_text?: string;
     }
 
     interface Feedback {
@@ -147,9 +149,15 @@ declare namespace RpmJson {
       description: string;
       iframe_url: string;
     }
+
+    interface Reason {
+      id: number;
+      text: string;
+    }
   }
 
   type UserInfo = Schemas.UserInfo;
+  type Reason = Schemas.Reason;
 
   interface AuthRequired {
     user_uuid: string;
