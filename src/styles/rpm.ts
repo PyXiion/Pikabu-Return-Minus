@@ -133,10 +133,10 @@ export const RPM_STYLE = `
 
 /* Placeholder that replaces a hidden story */
 .rpm-placeholder {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 6px 12px;
   box-sizing: border-box;
   width: 100%;
   margin: 20px 0 0;
@@ -149,31 +149,37 @@ export const RPM_STYLE = `
 }
 .rpm-placeholder .collapse-button {
   position: relative;
-  flex: none;
   left: auto;
   top: auto;
   margin: 0;
   translate: none;
+  grid-column: 1;
+  grid-row: 1;
+}
+.rpm-placeholder:has(.rpm-user-info-container) .collapse-button {
+  grid-row: 1 / span 2;
 }
 .rpm-placeholder-text {
   display: flex;
-  flex: 1 1 220px;
-  flex-wrap: wrap;
+  grid-column: 2;
   align-items: center;
   gap: 4px 10px;
-  min-width: 220px;
+  min-width: 0;
 }
 .rpm-placeholder-title {
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rpm-placeholder-text .rpm-chip {
+  flex: none;
+}
 .rpm-placeholder .rpm-user-info-container {
-  flex: 0 1 auto;
+  grid-column: 2;
   min-width: 0;
-  max-width: 100%;
 }
 .rpm-placeholder .rpm-user-info-container .story__user-info {
   flex-wrap: wrap;
@@ -186,7 +192,6 @@ export const RPM_STYLE = `
   display: none;
 }
 .mv .rpm-placeholder {
-  flex-wrap: wrap;
   font-size: 13px;
 }
 `;
