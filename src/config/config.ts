@@ -75,6 +75,7 @@ async function resetRpmToken() {
   try {
     // Register first so a server failure never leaves the user without a token
     const newUuid = await RPM.Service.register();
+    if (typeof newUuid !== "string" || !newUuid) throw new Error("empty token");
     GM_config.set("uuid", newUuid);
     GM_config.save();
   } catch {

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.15
+// @version      0.16
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -1387,6 +1387,7 @@
     if (!ok) return;
     try {
       const newUuid = await service_exports.register();
+      if (typeof newUuid !== "string" || !newUuid) throw new Error("empty token");
       GM_config.set("uuid", newUuid);
       GM_config.save();
     } catch {
