@@ -134,6 +134,7 @@ export const RPM_STYLE = `
 /* Placeholder that replaces a hidden story */
 .rpm-placeholder {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   box-sizing: border-box;
@@ -156,11 +157,11 @@ export const RPM_STYLE = `
 }
 .rpm-placeholder-text {
   display: flex;
-  flex: 1;
+  flex: 1 1 220px;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  min-width: 0;
+  min-width: 220px;
 }
 .rpm-placeholder-title {
   max-width: 100%;
@@ -170,7 +171,13 @@ export const RPM_STYLE = `
   white-space: nowrap;
 }
 .rpm-placeholder .rpm-user-info-container {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.rpm-placeholder .rpm-user-info-container .story__user-info {
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .rpm-placeholder .rpm-user-rating {
   margin-right: 0;
