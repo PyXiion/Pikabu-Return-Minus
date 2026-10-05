@@ -59,7 +59,13 @@ const TEMPLATE_WARNING =
   "Внутри может выполняться любой код, поэтому используйте с осторожностью. " +
   "Гарантированно работает только на Tampermonkey.";
 
-export function createSections(onRegister: () => void | Promise<void>): SectionDef[] {
+export interface RpmActions {
+  register: () => void | Promise<void>;
+  copyToken: () => void | Promise<void>;
+  resetToken: () => void | Promise<void>;
+}
+
+export function createSections(rpm: RpmActions): SectionDef[] {
   return [
     {
       id: "general",
@@ -237,7 +243,23 @@ export function createSections(onRegister: () => void | Promise<void>): SectionD
           title: "Регистрация в RPM",
           action: "Зарегистрироваться",
           desc: "Нужна, чтобы оценивать авторов. После регистрации страница перезагрузится.",
-          click: onRegister,
+          click: rpm.register,
+        },
+        {
+          key: "copyRpmToken",
+          type: "button",
+          title: "Токен RPM",
+          action: "Скопировать",
+          desc: "Ваш личный ключ в RPM. Никому его не показывайте: по нему можно голосовать от вашего имени. Он нужен, если вы просите удалить связанные с вами данные.",
+          click: rpm.copyToken,
+        },
+        {
+          key: "resetRpmToken",
+          type: "button",
+          title: "Сбросить токен",
+          action: "Сбросить",
+          desc: "Выдаёт новый токен. Ваши прошлые оценки останутся на сервере под старым токеном, и вы больше не сможете их изменить.",
+          click: rpm.resetToken,
         },
         { key: "uuid", type: "hidden", default: "" },
       ],

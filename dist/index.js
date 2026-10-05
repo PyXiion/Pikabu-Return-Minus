@@ -16,6 +16,8 @@
 // @grant        GM.registerMenuCommand
 // @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @license      MIT
+// @updateURL    https://github.com/PyXiion/Pikabu-Return-Minus/raw/main/dist/index.js
+// @downloadURL  https://github.com/PyXiion/Pikabu-Return-Minus/raw/main/dist/index.js
 // ==/UserScript==
 (() => {
   var __defProp = Object.defineProperty;
@@ -799,7 +801,7 @@
     };
   }
   var TEMPLATE_WARNING = "Внутри может выполняться любой код, поэтому используйте с осторожностью. Гарантированно работает только на Tampermonkey.";
-  function createSections(onRegister) {
+  function createSections(rpm) {
     return [
       {
         id: "general",
@@ -977,7 +979,23 @@
             title: "Регистрация в RPM",
             action: "Зарегистрироваться",
             desc: "Нужна, чтобы оценивать авторов. После регистрации страница перезагрузится.",
-            click: onRegister
+            click: rpm.register
+          },
+          {
+            key: "copyRpmToken",
+            type: "button",
+            title: "Токен RPM",
+            action: "Скопировать",
+            desc: "Ваш личный ключ в RPM. Никому его не показывайте: по нему можно голосовать от вашего имени. Он нужен, если вы просите удалить связанные с вами данные.",
+            click: rpm.copyToken
+          },
+          {
+            key: "resetRpmToken",
+            type: "button",
+            title: "Сбросить токен",
+            action: "Сбросить",
+            desc: "Выдаёт новый токен. Ваши прошлые оценки останутся на сервере под старым токеном, и вы больше не сможете их изменить.",
+            click: rpm.resetToken
           },
           { key: "uuid", type: "hidden", default: "" }
         ]
@@ -1351,6 +1369,34 @@
       );
     }
   }
+  async function copyRpmToken() {
+    const uuid = GM_config.get("uuid");
+    if (!uuid) return;
+    try {
+      await navigator.clipboard.writeText(uuid);
+      notifySuccess("Токен скопирован в буфер обмена.");
+    } catch {
+      window.prompt("Скопируйте токен вручную:", uuid);
+    }
+  }
+  async function resetRpmToken() {
+    if (!GM_config.get("uuid")) return;
+    const ok = window.confirm(
+      "Сбросить токен RPM?\n\nВы получите новый токен. Прошлые оценки останутся на сервере под старым токеном, и вы больше не сможете их изменить. Это нельзя отменить."
+    );
+    if (!ok) return;
+    try {
+      const newUuid = await service_exports.register();
+      GM_config.set("uuid", newUuid);
+      GM_config.save();
+    } catch {
+      notifyError("Не удалось получить новый токен. Старый токен сохранён.");
+      return;
+    }
+    notifySuccess("Новый токен получен. Страница перезагрузится.");
+    await sleep(300);
+    window.location.reload();
+  }
   function createTitle() {
     const title = document.createElement("div");
     title.classList.add("rpm-title");
@@ -1416,7 +1462,7 @@
   }
   async function handleConfig() {
     await handleOldConfigFields();
-    const sections = createSections(registerInRpm);
+    const sections = createSections({ register: registerInRpm, copyToken: copyRpmToken, resetToken: resetRpmToken });
     const fields = {};
     sections.forEach((section) => {
       section.fields.forEach((def, i) => {
@@ -3837,6 +3883,9 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
     processTabs();
     if (GM_config.get("uuid")) {
       delete GM_config.fields["registerRpm"];
+    } else {
+      delete GM_config.fields["copyRpmToken"];
+      delete GM_config.fields["resetRpmToken"];
     }
   }
   function unrollComments(button, attemptsLeft = 100) {

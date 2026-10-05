@@ -16,4 +16,6 @@
 // @grant        GM.registerMenuCommand
 // @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @license      MIT
+// @updateURL    https://github.com/PyXiion/Pikabu-Return-Minus/raw/main/dist/index.js
+// @downloadURL  https://github.com/PyXiion/Pikabu-Return-Minus/raw/main/dist/index.js
 // ==/UserScript==

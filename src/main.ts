@@ -43,6 +43,9 @@ async function onConfig() {
   processTabs();
   if (GM_config.get("uuid")) {
     delete GM_config.fields["registerRpm"];
+  } else {
+    delete GM_config.fields["copyRpmToken"];
+    delete GM_config.fields["resetRpmToken"];
   }
 }
 

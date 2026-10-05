@@ -1,7 +1,7 @@
 import { appState, formats, makeEval } from "./state";
 
 import { sleep } from "../utils/dom";
-import { sendNotification, notifySuccess } from "../utils/notification";
+import { sendNotification, notifySuccess, notifyError } from "../utils/notification";
 import * as RPM from "../rpm";
 import * as SettingEnums from "./enums";
 import { createSections, FieldDef } from "./schema";
@@ -50,6 +50,40 @@ async function registerInRpm() {
       "Вы не можете зарегистрироваться ещё раз."
     );
   }
+}
+
+async function copyRpmToken() {
+  const uuid = GM_config.get("uuid") as string;
+  if (!uuid) return;
+  try {
+    await navigator.clipboard.writeText(uuid);
+    notifySuccess("Токен скопирован в буфер обмена.");
+  } catch {
+    // Clipboard API can be blocked by the page's permissions policy
+    window.prompt("Скопируйте токен вручную:", uuid);
+  }
+}
+
+async function resetRpmToken() {
+  if (!GM_config.get("uuid")) return;
+  const ok = window.confirm(
+    "Сбросить токен RPM?\n\nВы получите новый токен. Прошлые оценки останутся на сервере " +
+      "под старым токеном, и вы больше не сможете их изменить. Это нельзя отменить."
+  );
+  if (!ok) return;
+
+  try {
+    // Register first so a server failure never leaves the user without a token
+    const newUuid = await RPM.Service.register();
+    GM_config.set("uuid", newUuid);
+    GM_config.save();
+  } catch {
+    notifyError("Не удалось получить новый токен. Старый токен сохранён.");
+    return;
+  }
+  notifySuccess("Новый токен получен. Страница перезагрузится.");
+  await sleep(300);
+  window.location.reload();
 }
 
 function createTitle() {
@@ -135,7 +169,7 @@ function applyDerivedSettings(config: GM_configStruct) {
 export async function handleConfig() {
   await handleOldConfigFields();
 
-  const sections = createSections(registerInRpm);
+  const sections = createSections({ register: registerInRpm, copyToken: copyRpmToken, resetToken: resetRpmToken });
 
   const fields: Record<string, any> = {};
   sections.forEach((section) => {
