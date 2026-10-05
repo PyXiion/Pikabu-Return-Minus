@@ -25,7 +25,7 @@ jobs:
             echo "::error::dist/index.js is stale. Run 'npm run build' and commit the result."
             exit 1
           fi
-      - name: Userscript metadata has update URLs and matches package version
+      - name: Userscript metadata has update URLs
         run: |
           grep -q '^// @updateURL ' dist/index.js
           grep -q '^// @downloadURL ' dist/index.js
