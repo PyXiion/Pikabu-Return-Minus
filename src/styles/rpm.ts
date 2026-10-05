@@ -139,7 +139,7 @@ export const RPM_STYLE = `
   gap: 12px;
   box-sizing: border-box;
   width: 100%;
-  margin: 10px 0;
+  margin: 20px 0 0;
   padding: 8px 14px 8px 8px;
   border: 1px solid var(--rpm-border);
   border-radius: var(--rpm-radius);
