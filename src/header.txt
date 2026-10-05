@@ -1,0 +1,19 @@
+// ==UserScript==
+// @name         Return Pikabu minus
+// @version      0.14
+// @namespace    pikabu-return-minus.pyxiion.ru
+// @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
+// @author       PyXiion
+// @match        *://pikabu.ru/*
+// @connect      api.pikabu.ru
+// @connect      pikabu.ru
+// @connect      rpm.pyxiion.ru
+// @connect      gollum.space
+// @connect      isla-de-muerta.com
+// @grant        GM.xmlHttpRequest
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.registerMenuCommand
+// @require      https://openuserjs.org/src/libs/sizzle/GM_config.js
+// @license      MIT
+// ==/UserScript==

@@ -154,10 +154,22 @@ declare namespace RpmJson {
       id: number;
       text: string;
     }
+
+    interface VotesInfo {
+      // Name of voter
+      name: string;
+      // Vote
+      vote: number;
+      text: string;
+      url: string;
+      timestamp: number;
+    }
   }
 
   type UserInfo = Schemas.UserInfo;
   type Reason = Schemas.Reason;
+  type VotesInfo = Schemas.VotesInfo;
+
 
   interface AuthRequired {
     user_uuid: string;
@@ -248,6 +260,8 @@ interface InitOptionsNoCustom {
     css?: string;
     /** Element to use for the config panel */
     frame?: HTMLElement;
+    /** Inline style applied to the frame element */
+    frameStyle?: string;
 
     /** Handlers for different events */
     events?: {

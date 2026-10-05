@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "build": "tsc -p . && node build.mjs"
+  },
+  "dependencies": {
+    "@types/greasemonkey": "^4.0.7",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

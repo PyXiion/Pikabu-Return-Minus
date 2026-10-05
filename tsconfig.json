@@ -1,13 +1,11 @@
 {
   "compilerOptions": {
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "outDir": "./dist/",
     "target": "ES2020",
-    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
     "types": ["greasemonkey"]
   },
-  "files": [
-    "index.ts",
-    "index.d.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }
