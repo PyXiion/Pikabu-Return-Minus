@@ -1651,15 +1651,10 @@
   function handleComment(comment) {
     const count = comment.querySelector(".comment__rating-count");
     if (!count || count.classList.contains("rpm-processed")) return;
-    if (count.parentElement?.querySelector(".rpm-new-rating-counter")) {
-      count.classList.add("rpm-processed");
-      return;
-    }
     count.classList.add("rpm-processed");
+    if (count.parentElement?.querySelector(".rpm-new-rating-counter")) return;
     info("Поймал комментарий!", comment);
-    if (GM_config.get("rpmComments")) {
-      processCommentRpm(comment);
-    }
+    if (GM_config.get("rpmComments")) processCommentRpm(comment);
     processComment(comment);
   }
   async function processComment(commentElem) {
@@ -2482,10 +2477,10 @@
         for (const node of mutation.addedNodes) {
           if (!(node instanceof HTMLElement)) continue;
           if (node.hasAttribute("rpm-observer-ignore")) continue;
-          const owner = node.closest(".comment:not(.comment_deleted)");
-          const comments = node.querySelectorAll(".comment:not(.comment_deleted)");
+          const selector = ".comment:not(.comment_deleted)";
+          const owner = node.closest(selector);
           if (owner) handleComment(owner);
-          for (const commentElem of Array.from(comments)) handleComment(commentElem);
+          node.querySelectorAll(selector).forEach(handleComment);
           if (node.matches("article.story")) {
             const storyElem = node;
             info("Поймал пост!", storyElem);

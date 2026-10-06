@@ -16,11 +16,10 @@ export function mutationsListener(
         if (node.hasAttribute("rpm-observer-ignore")) continue;
 
         // Pikabu may re-render only the inside of an existing comment
-        const owner = node.closest<HTMLDivElement>(".comment:not(.comment_deleted)");
-        const comments = node.querySelectorAll<HTMLDivElement>(".comment:not(.comment_deleted)");
-
+        const selector = ".comment:not(.comment_deleted)";
+        const owner = node.closest<HTMLDivElement>(selector);
         if (owner) handleComment(owner);
-        for (const commentElem of Array.from(comments)) handleComment(commentElem);
+        node.querySelectorAll<HTMLDivElement>(selector).forEach(handleComment);
 
         if (node.matches("article.story")) {
           const storyElem = node as HTMLDivElement;

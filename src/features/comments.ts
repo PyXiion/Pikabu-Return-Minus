@@ -32,17 +32,13 @@ function getCommentMeta(comment: HTMLDivElement, key: string) {
 export function handleComment(comment: HTMLDivElement) {
   const count = comment.querySelector(".comment__rating-count");
   if (!count || count.classList.contains("rpm-processed")) return;
-  // Rating UI we injected survived (only the count node was swapped): don't duplicate it
-  if (count.parentElement?.querySelector(".rpm-new-rating-counter")) {
-    count.classList.add("rpm-processed");
-    return;
-  }
   count.classList.add("rpm-processed");
 
+  // Our rating UI survived (only the count node was swapped): don't duplicate it
+  if (count.parentElement?.querySelector(".rpm-new-rating-counter")) return;
+
   info("Поймал комментарий!", comment);
-  if (GM_config.get("rpmComments")) {
-    processCommentRpm(comment);
-  }
+  if (GM_config.get("rpmComments")) processCommentRpm(comment);
   processComment(comment);
 }
 
