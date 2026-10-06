@@ -41,6 +41,7 @@ button.rpm-modal-close {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   flex: none;
   width: 32px;
   height: 32px;
@@ -51,6 +52,9 @@ button.rpm-modal-close {
   background: none;
   color: var(--rpm-muted);
   cursor: pointer;
+}
+button.rpm-modal-close svg {
+  display: block;
 }
 button.rpm-modal-close:hover {
   background: var(--rpm-surface);

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Return Pikabu minus
-// @version      0.16.1
+// @version      0.16.2
 // @namespace    pikabu-return-minus.pyxiion.ru
 // @description  Возвращает минусы на Pikabu, а также фильтрацию по рейтингу.
 // @author       PyXiion
@@ -2748,6 +2748,7 @@ button.rpm-modal-close {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   flex: none;
   width: 32px;
   height: 32px;
@@ -2758,6 +2759,9 @@ button.rpm-modal-close {
   background: none;
   color: var(--rpm-muted);
   cursor: pointer;
+}
+button.rpm-modal-close svg {
+  display: block;
 }
 button.rpm-modal-close:hover {
   background: var(--rpm-surface);
