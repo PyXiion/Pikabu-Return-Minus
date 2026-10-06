@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Tag matches @version and dist is up to date
+        run: |
+          grep -qx "// @version      ${GITHUB_REF_NAME}" dist/index.js \
+            || { echo "::error::Tag ${GITHUB_REF_NAME} does not match @version in dist/index.js"; exit 1; }
+          git diff --exit-code -- dist/index.js \
+            || { echo "::error::dist/index.js is stale. Run 'npm run build' and commit it."; exit 1; }
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dist/index.js return-pikabu-minus.user.js
+          gh release create "$GITHUB_REF_NAME" return-pikabu-minus.user.js \
+            --title "$GITHUB_REF_NAME" --generate-notes
