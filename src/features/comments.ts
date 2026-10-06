@@ -32,6 +32,11 @@ function getCommentMeta(comment: HTMLDivElement, key: string) {
 export function handleComment(comment: HTMLDivElement) {
   const count = comment.querySelector(".comment__rating-count");
   if (!count || count.classList.contains("rpm-processed")) return;
+  // Rating UI we injected survived (only the count node was swapped): don't duplicate it
+  if (count.parentElement?.querySelector(".rpm-new-rating-counter")) {
+    count.classList.add("rpm-processed");
+    return;
+  }
   count.classList.add("rpm-processed");
 
   info("Поймал комментарий!", comment);
@@ -72,6 +77,7 @@ export async function processComment(commentElem: HTMLDivElement) {
 export function processCommentRpm(comment: HTMLDivElement) {
   const uid = getCommentAuthorId(comment);
   if (!uid) return;
+  if (comment.querySelector(":scope > .comment__body > .comment__header .rpm-user-rating")) return;
 
   let url = comment.getAttribute('data-copy-url');
   if (!url) url = (comment.querySelector(':scope > .comment__body > .comment__header a.comment__tool[data-role="link"]') as HTMLAnchorElement).href;
