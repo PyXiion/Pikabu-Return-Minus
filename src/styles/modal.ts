@@ -31,33 +31,9 @@ export const MODAL_STYLE = `
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 12px 8px 20px;
+  padding: 16px 20px 8px;
   font-size: 18px;
   font-weight: 700;
-}
-button.rpm-modal-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--rpm-muted);
-  cursor: pointer;
-}
-button.rpm-modal-close svg {
-  display: block;
-}
-button.rpm-modal-close:hover {
-  background: var(--rpm-surface);
 }
 .rpm-modal-body {
   min-height: 0;

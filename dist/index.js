@@ -437,12 +437,7 @@
     const header = createElementWithClass("div", "rpm-modal-header");
     const heading = createElementWithClass("span");
     heading.textContent = title;
-    const closeButton = createElementWithClass("button", "rpm-modal-close");
-    closeButton.type = "button";
-    closeButton.setAttribute("aria-label", "Закрыть");
-    closeButton.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>';
-    closeButton.addEventListener("click", () => overlay.remove());
-    header.append(heading, closeButton);
+    header.append(heading);
     const body = createElementWithClass("div", "rpm-modal-body");
     body.appendChild(bodyContent);
     const footer = createElementWithClass("div", "rpm-modal-footer");
@@ -2738,33 +2733,9 @@ button.rpm-btn:focus-visible {
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 12px 8px 20px;
+  padding: 16px 20px 8px;
   font-size: 18px;
   font-weight: 700;
-}
-button.rpm-modal-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--rpm-muted);
-  cursor: pointer;
-}
-button.rpm-modal-close svg {
-  display: block;
-}
-button.rpm-modal-close:hover {
-  background: var(--rpm-surface);
 }
 .rpm-modal-body {
   min-height: 0;

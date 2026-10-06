@@ -9,7 +9,7 @@ export interface DialogButton {
 
 /**
  * Creates and appends a generic modal dialog to the document.
- * Closes on Escape, backdrop click and the × button.
+ * Closes on Escape and backdrop click; closing buttons come from `buttons`.
  * @param title - The title of the modal.
  * @param bodyContent - The body content of the modal.
  * @param buttons - The buttons to display in the footer.
@@ -31,15 +31,7 @@ export function createModalDialog(title: string, bodyContent: HTMLElement, butto
   const heading = createElementWithClass("span");
   heading.textContent = title;
 
-  const closeButton = createElementWithClass("button", "rpm-modal-close");
-  closeButton.type = "button";
-  closeButton.setAttribute("aria-label", "Закрыть");
-  // An SVG cross is centered exactly; the "×" glyph sits off-center in most fonts
-  closeButton.innerHTML =
-    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>';
-  closeButton.addEventListener("click", () => overlay.remove());
-
-  header.append(heading, closeButton);
+  header.append(heading);
 
   const body = createElementWithClass("div", "rpm-modal-body");
   body.appendChild(bodyContent);
