@@ -38,6 +38,9 @@ export const MODAL_STYLE = `
   font-weight: 700;
 }
 button.rpm-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 32px;
   height: 32px;
@@ -47,8 +50,6 @@ button.rpm-modal-close {
   border-radius: 8px;
   background: none;
   color: var(--rpm-muted);
-  font-size: 22px;
-  line-height: 1;
   cursor: pointer;
 }
 button.rpm-modal-close:hover {

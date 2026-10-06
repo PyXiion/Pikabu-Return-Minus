@@ -34,7 +34,9 @@ export function createModalDialog(title: string, bodyContent: HTMLElement, butto
   const closeButton = createElementWithClass("button", "rpm-modal-close");
   closeButton.type = "button";
   closeButton.setAttribute("aria-label", "Закрыть");
-  closeButton.textContent = "\u00d7";
+  // An SVG cross is centered exactly; the "×" glyph sits off-center in most fonts
+  closeButton.innerHTML =
+    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>';
   closeButton.addEventListener("click", () => overlay.remove());
 
   header.append(heading, closeButton);

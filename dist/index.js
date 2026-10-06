@@ -440,7 +440,7 @@
     const closeButton = createElementWithClass("button", "rpm-modal-close");
     closeButton.type = "button";
     closeButton.setAttribute("aria-label", "Закрыть");
-    closeButton.textContent = "×";
+    closeButton.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>';
     closeButton.addEventListener("click", () => overlay.remove());
     header.append(heading, closeButton);
     const body = createElementWithClass("div", "rpm-modal-body");
@@ -2745,6 +2745,9 @@ button.rpm-btn:focus-visible {
   font-weight: 700;
 }
 button.rpm-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 32px;
   height: 32px;
@@ -2754,8 +2757,6 @@ button.rpm-modal-close {
   border-radius: 8px;
   background: none;
   color: var(--rpm-muted);
-  font-size: 22px;
-  line-height: 1;
   cursor: pointer;
 }
 button.rpm-modal-close:hover {
