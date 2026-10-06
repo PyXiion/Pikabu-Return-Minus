@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["[0-9]+.[0-9]+*"]
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
 
 permissions:
   contents: write
@@ -21,8 +21,9 @@ jobs:
       - run: npm run build
       - name: Tag matches @version and dist is up to date
         run: |
-          grep -qx "// @version      ${GITHUB_REF_NAME}" dist/index.js \
-            || { echo "::error::Tag ${GITHUB_REF_NAME} does not match @version in dist/index.js"; exit 1; }
+          VERSION="${GITHUB_REF_NAME#v}"
+          grep -qx "// @version      ${VERSION}" dist/index.js \
+            || { echo "::error::Tag ${GITHUB_REF_NAME} does not match @version ${VERSION} in dist/index.js"; exit 1; }
           git diff --exit-code -- dist/index.js \
             || { echo "::error::dist/index.js is stale. Run 'npm run build' and commit it."; exit 1; }
       - name: Create release
@@ -31,4 +32,4 @@ jobs:
         run: |
           cp dist/index.js return-pikabu-minus.user.js
           gh release create "$GITHUB_REF_NAME" return-pikabu-minus.user.js \
-            --title "$GITHUB_REF_NAME" --generate-notes
+            --title "${GITHUB_REF_NAME#v}" --generate-notes
