@@ -1,6 +1,6 @@
 import { handleConfig } from "./config/config";
 import { appState, waitConfig } from "./config/state";
-import { processComment, processCommentRpm } from "./features/comments";
+import { handleComment } from "./features/comments";
 import { mutationsListener } from "./features/observer";
 import { processStories } from "./features/stories";
 import { addSettingsOpenButton, processTabs } from "./features/ui";
@@ -110,15 +110,8 @@ async function onLoad() {
 
   if (!supportMenuCommands) addSettingsOpenButton();
 
-  // Comments may already have been handled by the mutation observer
   for (const comment of document.querySelectorAll<HTMLDivElement>(".comment")) {
-    if (comment.dataset.processed) continue;
-    comment.dataset.processed = "true";
-
-    if (GM_config.get("rpmComments")) {
-      processCommentRpm(comment);
-    }
-    processComment(comment);
+    handleComment(comment);
   }
 }
 

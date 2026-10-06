@@ -1,3 +1,4 @@
+import { info } from "../utils/log";
 import { getRealRating, replaceRating } from "./rating";
 import { addRatingBar, updateRatingBar } from "./story-ui";
 import * as RPM from "../rpm";
@@ -21,6 +22,23 @@ function getCommentMeta(comment: HTMLDivElement, key: string) {
       return matches[1];
   }
   return null;
+}
+
+/**
+ * Processes a comment unless its current DOM is already processed.
+ * The marker lives on the rating counter (not on the comment root), so it
+ * disappears if Pikabu re-renders the comment's contents in place.
+ */
+export function handleComment(comment: HTMLDivElement) {
+  const count = comment.querySelector(".comment__rating-count");
+  if (!count || count.classList.contains("rpm-processed")) return;
+  count.classList.add("rpm-processed");
+
+  info("Поймал комментарий!", comment);
+  if (GM_config.get("rpmComments")) {
+    processCommentRpm(comment);
+  }
+  processComment(comment);
 }
 
 export async function processComment(commentElem: HTMLDivElement) {

@@ -1648,6 +1648,16 @@
     }
     return null;
   }
+  function handleComment(comment) {
+    const count = comment.querySelector(".comment__rating-count");
+    if (!count || count.classList.contains("rpm-processed")) return;
+    count.classList.add("rpm-processed");
+    info("Поймал комментарий!", comment);
+    if (GM_config.get("rpmComments")) {
+      processCommentRpm(comment);
+    }
+    processComment(comment);
+  }
   async function processComment(commentElem) {
     const commentRatingBlock = commentElem.querySelector(".comment__rating");
     if (commentRatingBlock.childElementCount === 1)
@@ -2467,16 +2477,10 @@
         for (const node of mutation.addedNodes) {
           if (!(node instanceof HTMLElement)) continue;
           if (node.hasAttribute("rpm-observer-ignore")) continue;
-          const comments = node.matches(".comment") ? [node] : Array.from(node.querySelectorAll(".comment:not(.comment_deleted)"));
-          for (const commentElem of comments) {
-            if (commentElem.dataset.processed) continue;
-            info("Поймал комментарий!", commentElem);
-            processComment(commentElem);
-            if (GM_config.get("rpmComments")) {
-              processCommentRpm(commentElem);
-            }
-            commentElem.dataset.processed = "true";
-          }
+          const owner = node.closest(".comment:not(.comment_deleted)");
+          const comments = node.querySelectorAll(".comment:not(.comment_deleted)");
+          if (owner) handleComment(owner);
+          for (const commentElem of Array.from(comments)) handleComment(commentElem);
           if (node.matches("article.story")) {
             const storyElem = node;
             info("Поймал пост!", storyElem);
@@ -3948,12 +3952,7 @@ html[data-theme="sunset-glow"] .achievements-progress__bar {
     commentMoreBtn();
     if (!supportMenuCommands) addSettingsOpenButton();
     for (const comment of document.querySelectorAll(".comment")) {
-      if (comment.dataset.processed) continue;
-      comment.dataset.processed = "true";
-      if (GM_config.get("rpmComments")) {
-        processCommentRpm(comment);
-      }
-      processComment(comment);
+      handleComment(comment);
     }
   }
   async function onUserProfilePage() {

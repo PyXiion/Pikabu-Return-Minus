@@ -1,4 +1,4 @@
-import { processComment, processCommentRpm } from "./comments";
+import { handleComment } from "./comments";
 import { handleMiniProfile } from "./mini-profile";
 import { processStory } from "./stories";
 import { commentMoreBtn } from "../main";
@@ -15,21 +15,12 @@ export function mutationsListener(
         if (!(node instanceof HTMLElement)) continue;
         if (node.hasAttribute("rpm-observer-ignore")) continue;
 
-        const comments = node.matches(".comment")
-          ? [node]
-          : Array.from(node.querySelectorAll(".comment:not(.comment_deleted)"));
+        // Pikabu may re-render only the inside of an existing comment
+        const owner = node.closest<HTMLDivElement>(".comment:not(.comment_deleted)");
+        const comments = node.querySelectorAll<HTMLDivElement>(".comment:not(.comment_deleted)");
 
-        for (const commentElem of comments as HTMLDivElement[]) {
-          if (commentElem.dataset.processed) continue;
-
-          info("Поймал комментарий!", commentElem);
-          processComment(commentElem);
-
-          if (GM_config.get("rpmComments")) {
-            processCommentRpm(commentElem);
-          }
-          commentElem.dataset.processed = "true";
-        }
+        if (owner) handleComment(owner);
+        for (const commentElem of Array.from(comments)) handleComment(commentElem);
 
         if (node.matches("article.story")) {
           const storyElem = node as HTMLDivElement;
